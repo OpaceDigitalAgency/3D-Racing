@@ -27,7 +27,7 @@ export type GameAPI = {
 
 export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const { engine, renderer } = await createEngine(canvas);
-  const { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps } = await createScene(engine, canvas);
+  const { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps, speedPads, bridges } = await createScene(engine, canvas);
 
   const input = new InputState();
   const detachKeyboard = attachKeyboard(input, canvas);
@@ -42,8 +42,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     rolling: 0.45,
     lateralGrip: 19.0,
     handbrakeGripScale: 0.35,
-    offroadGripScale: 0.7,      // Increased from 0.55 - can still drive on grass
-    offroadDragScale: 1.4,      // Reduced from 1.9 - less resistance on grass
+    offroadGripScale: 0.85,     // Higher grip on grass - less likely to get stuck
+    offroadDragScale: 1.2,      // Lower drag - easier to drive off-road
     maxSpeed: 88
   });
 
@@ -59,6 +59,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   // Collision cooldown to prevent rapid damage
   let collisionCooldown = 0;
   let wasInWater = false;
+  let speedPadCooldown = 0;  // Prevent instant re-trigger
 
   let quality: QualityPresetId = "high";
   let ssaoAttached = false;
@@ -187,12 +188,16 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     try {
       const { projection, onTrack } = track.surfaceAtToRef(sim.position, projRef);
 
+      // Improved off-road surface - still driveable but with reduced performance
       const surface = onTrack
         ? { grip: 1.0, dragScale: 1.0 }
         : { grip: sim.params.offroadGripScale, dragScale: sim.params.offroadDragScale };
 
       // Get ramp height at current position
       const rampInfo = ramps.getHeightAt(sim.position, sim.yawRad);
+
+      // Get bridge height at current position
+      const bridgeInfo = bridges.getHeightAt(sim.position);
 
       // Handle side collision with ramp barriers
       if (rampInfo.sideCollision) {
@@ -214,11 +219,31 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         }
       }
 
+      // Speed pad detection - trigger nitro boost
+      if (speedPadCooldown > 0) {
+        speedPadCooldown -= dt;
+      } else {
+        const onSpeedPad = speedPads.isOnSpeedPad(sim.position);
+        if (onSpeedPad && sim.speedMps > 5) {
+          // Activate 3x nitro boost for 2.5 seconds
+          sim.activateNitroBoost(2.5, 3);
+          exhaustFire.activateNitroBoost(2.5);
+          speedPadCooldown = 3.0;  // Cooldown before can trigger again
+        }
+      }
+
+      // Update speed pad visuals
+      speedPads.update(dt);
+
+      // Determine ground height - take highest of ramp or bridge
+      const groundHeight = Math.max(rampInfo.height, bridgeInfo.height);
+      const onRampOrBridge = rampInfo.onRamp || bridgeInfo.onBridge;
+
       // Pass ground info to physics
       const groundInfo = {
-        height: rampInfo.height,
+        height: groundHeight,
         normal: rampInfo.normal,
-        onRamp: rampInfo.onRamp
+        onRamp: onRampOrBridge
       };
 
       sim.update(
@@ -290,14 +315,15 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       smokeParticles.emitRate = 0;
     }
 
-    // Update exhaust fire
+    // Update exhaust fire with dt for nitro boost timing
     exhaustFire.update(
       sim.position,
       sim.forwardVec,
       sim.rightVec,
       sim.yawRad,
       input.throttle,
-      sim.speedMps
+      sim.speedMps,
+      dt
     );
 
     // Water splash effects

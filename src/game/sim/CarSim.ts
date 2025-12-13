@@ -28,6 +28,10 @@ export class CarSim {
   isAirborne = false;
   airTime = 0;
 
+  // Nitro boost state
+  nitroBoostMultiplier = 1;
+  nitroBoostTimeRemaining = 0;
+
   private steerSmoothed = 0;
   private readonly prevVelocity = new Vector3(0, 0, 0);
   readonly accelWorld = new Vector3(0, 0, 0);
@@ -42,6 +46,16 @@ export class CarSim {
   private readonly carHeight = 0.55; // Height of car centre above ground
 
   constructor(public readonly params: CarSimParams) {}
+
+  // Activate nitro boost - 3x speed for a duration
+  activateNitroBoost(duration: number = 2.5, multiplier: number = 3) {
+    this.nitroBoostMultiplier = multiplier;
+    this.nitroBoostTimeRemaining = duration;
+  }
+
+  isNitroActive(): boolean {
+    return this.nitroBoostTimeRemaining > 0;
+  }
 
   private updateBasis() {
     const s = Math.sin(this.yawRad);
@@ -58,6 +72,8 @@ export class CarSim {
     this.isAirborne = false;
     this.airTime = 0;
     this.steerSmoothed = 0;
+    this.nitroBoostMultiplier = 1;
+    this.nitroBoostTimeRemaining = 0;
     this.updateBasis();
   }
 
@@ -79,6 +95,15 @@ export class CarSim {
     surface: { grip: number; dragScale: number },
     ground: GroundInfo = { height: 0, normal: new Vector3(0, 1, 0), onRamp: false }
   ) {
+    // Update nitro boost timer
+    if (this.nitroBoostTimeRemaining > 0) {
+      this.nitroBoostTimeRemaining -= dt;
+      if (this.nitroBoostTimeRemaining <= 0) {
+        this.nitroBoostTimeRemaining = 0;
+        this.nitroBoostMultiplier = 1;
+      }
+    }
+
     const { throttle, brake, handbrake } = input;
     const groundHeight = ground.height + this.carHeight;
 
@@ -154,12 +179,17 @@ export class CarSim {
           longA = Math.max(0, longA);
         }
       } else {
-        const engineA = throttle * this.params.engineAccel;
+        // Apply nitro boost multiplier to engine acceleration
+        // Boost acceleration when off-road and at low speed to prevent getting stuck
+        const lowSpeedBoost = speed < 3 && surface.grip < 1 ? 1.3 : 1.0;
+        const engineA = throttle * this.params.engineAccel * this.nitroBoostMultiplier * lowSpeedBoost;
         const brakeA = brake * this.params.brakeDecel;
         longA = engineA - (vF > 0 ? brakeA : -brakeA);
       }
 
-      const dragA = this.params.drag * speed * speed + this.params.rolling * speed;
+      // Reduce drag at very low speeds to prevent getting stuck
+      const dragReduction = speed < 2 ? 0.5 : 1.0;
+      const dragA = (this.params.drag * speed * speed + this.params.rolling * speed) * dragReduction;
       const dragSigned = speed > 0.1 ? dragA * Math.sign(vF) : 0;
 
       const aLong = longA - dragSigned * surface.dragScale;
@@ -172,7 +202,8 @@ export class CarSim {
       forward.scaleToRef(vF2, this.tmpVel);
       right.scaleToRef(vR2, this.tmpLat);
       this.tmpVel.addInPlace(this.tmpLat);
-      const max = this.params.maxSpeed;
+      // Increase max speed during nitro boost
+      const max = this.params.maxSpeed * (this.nitroBoostMultiplier > 1 ? 1.5 : 1);
       const len = this.tmpVel.length();
       if (len > max) this.tmpVel.scaleInPlace(max / len);
 

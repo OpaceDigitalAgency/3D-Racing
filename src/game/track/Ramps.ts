@@ -82,29 +82,46 @@ export class RampSystem {
     const hl = length / 2;
 
     // Create wedge geometry - ramp goes from back (y=0) rising to front (y=height)
-    // Vertices laid out for proper face rendering
+    // Use more vertices for smooth appearance
     const positions: number[] = [];
     const indices: number[] = [];
     const normals: number[] = [];
+    const uvs: number[] = [];
 
     // Calculate slope normal
     const slopeAngle = Math.atan2(height, length);
     const slopeNy = Math.cos(slopeAngle);
     const slopeNz = -Math.sin(slopeAngle);
 
-    // TOP SLOPE FACE (4 vertices, 2 triangles)
-    const topStart = positions.length / 3;
-    positions.push(
-      -hw, 0, -hl,        // back-left
-      hw, 0, -hl,         // back-right
-      hw, height, hl,     // front-right (top)
-      -hw, height, hl     // front-left (top)
-    );
-    for (let i = 0; i < 4; i++) normals.push(0, slopeNy, slopeNz);
-    indices.push(topStart, topStart + 2, topStart + 1);
-    indices.push(topStart, topStart + 3, topStart + 2);
+    // TOP SLOPE FACE with subdivisions for better lighting
+    const subdivs = 8;
+    for (let i = 0; i <= subdivs; i++) {
+      for (let j = 0; j <= subdivs; j++) {
+        const u = i / subdivs;
+        const v = j / subdivs;
+        const x = -hw + u * width;
+        const z = -hl + v * length;
+        const y = v * height; // Height increases along length
 
-    // FRONT FACE - vertical drop (4 vertices)
+        positions.push(x, y, z);
+        normals.push(0, slopeNy, slopeNz);
+        uvs.push(u, v);
+      }
+    }
+
+    // Generate indices for top face
+    for (let i = 0; i < subdivs; i++) {
+      for (let j = 0; j < subdivs; j++) {
+        const a = i * (subdivs + 1) + j;
+        const b = a + 1;
+        const c = a + subdivs + 1;
+        const d = c + 1;
+        indices.push(a, c, b);
+        indices.push(b, c, d);
+      }
+    }
+
+    // FRONT FACE - vertical drop
     const frontStart = positions.length / 3;
     positions.push(
       -hw, 0, hl,         // bottom-left
@@ -113,51 +130,43 @@ export class RampSystem {
       -hw, height, hl     // top-left
     );
     for (let i = 0; i < 4; i++) normals.push(0, 0, 1);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(frontStart, frontStart + 2, frontStart + 1);
     indices.push(frontStart, frontStart + 3, frontStart + 2);
 
-    // BACK FACE (just the edge at ground level - 4 vertices for a thin strip)
+    // BACK FACE
     const backStart = positions.length / 3;
     positions.push(
-      -hw, 0, -hl,
       hw, 0, -hl,
-      hw, 0.01, -hl,
-      -hw, 0.01, -hl
+      -hw, 0, -hl,
+      -hw, 0.05, -hl,
+      hw, 0.05, -hl
     );
     for (let i = 0; i < 4; i++) normals.push(0, 0, -1);
-    indices.push(backStart, backStart + 1, backStart + 2);
-    indices.push(backStart, backStart + 2, backStart + 3);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+    indices.push(backStart, backStart + 2, backStart + 1);
+    indices.push(backStart, backStart + 3, backStart + 2);
 
-    // BOTTOM FACE (4 vertices)
+    // BOTTOM FACE
     const bottomStart = positions.length / 3;
-    positions.push(
-      -hw, 0, -hl,
-      hw, 0, -hl,
-      hw, 0, hl,
-      -hw, 0, hl
-    );
+    positions.push(-hw, 0, -hl, hw, 0, -hl, hw, 0, hl, -hw, 0, hl);
     for (let i = 0; i < 4; i++) normals.push(0, -1, 0);
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(bottomStart, bottomStart + 1, bottomStart + 2);
     indices.push(bottomStart, bottomStart + 2, bottomStart + 3);
 
-    // LEFT SIDE TRIANGLE (3 vertices)
+    // LEFT SIDE
     const leftStart = positions.length / 3;
-    positions.push(
-      -hw, 0, -hl,
-      -hw, 0, hl,
-      -hw, height, hl
-    );
+    positions.push(-hw, 0, -hl, -hw, 0, hl, -hw, height, hl);
     for (let i = 0; i < 3; i++) normals.push(-1, 0, 0);
+    uvs.push(0, 0, 1, 0, 0.5, 1);
     indices.push(leftStart, leftStart + 1, leftStart + 2);
 
-    // RIGHT SIDE TRIANGLE (3 vertices)
+    // RIGHT SIDE
     const rightStart = positions.length / 3;
-    positions.push(
-      hw, 0, -hl,
-      hw, height, hl,
-      hw, 0, hl
-    );
+    positions.push(hw, 0, -hl, hw, height, hl, hw, 0, hl);
     for (let i = 0; i < 3; i++) normals.push(1, 0, 0);
+    uvs.push(0, 0, 0.5, 1, 1, 0);
     indices.push(rightStart, rightStart + 1, rightStart + 2);
 
     const ramp = new Mesh("ramp", this.scene);
@@ -165,45 +174,48 @@ export class RampSystem {
     vertexData.positions = positions;
     vertexData.indices = indices;
     vertexData.normals = normals;
+    vertexData.uvs = uvs;
 
     vertexData.applyToMesh(ramp);
     ramp.material = this.rampMaterial;
     ramp.receiveShadows = true;
     ramp.position.copyFrom(info.position);
-    ramp.position.y = 0.01; // Slightly above ground
+    ramp.position.y = 0.02;
     ramp.rotation.y = info.rotation;
 
     if (this.shadowGen) {
       this.shadowGen.addShadowCaster(ramp);
     }
 
-    // Add small side rails (not full height barriers)
-    const railHeight = 0.25;
-    const railWidth = 0.12;
+    // Add side barriers with hazard stripes
+    const barrierHeight = 0.5;
+    const barrierWidth = 0.2;
 
-    // Left rail
-    const leftRail = CreateBox("leftRail", {
-      width: railWidth,
-      height: railHeight,
-      depth: length
+    // Left barrier - angled to follow ramp slope
+    const leftBarrier = CreateBox("leftBarrier", {
+      width: barrierWidth,
+      height: barrierHeight,
+      depth: length * 1.02
     }, this.scene);
-    leftRail.position.set(-hw - railWidth/2, railHeight/2 + height * 0.3, 0);
-    leftRail.material = this.sideMaterial;
-    leftRail.parent = ramp;
-    leftRail.receiveShadows = true;
-    if (this.shadowGen) this.shadowGen.addShadowCaster(leftRail);
+    leftBarrier.position.set(-hw - barrierWidth / 2, height / 2 + barrierHeight / 2, 0);
+    leftBarrier.rotation.x = -slopeAngle;
+    leftBarrier.material = this.sideMaterial;
+    leftBarrier.parent = ramp;
+    leftBarrier.receiveShadows = true;
+    if (this.shadowGen) this.shadowGen.addShadowCaster(leftBarrier);
 
-    // Right rail
-    const rightRail = CreateBox("rightRail", {
-      width: railWidth,
-      height: railHeight,
-      depth: length
+    // Right barrier
+    const rightBarrier = CreateBox("rightBarrier", {
+      width: barrierWidth,
+      height: barrierHeight,
+      depth: length * 1.02
     }, this.scene);
-    rightRail.position.set(hw + railWidth/2, railHeight/2 + height * 0.3, 0);
-    rightRail.material = this.sideMaterial;
-    rightRail.parent = ramp;
-    rightRail.receiveShadows = true;
-    if (this.shadowGen) this.shadowGen.addShadowCaster(rightRail);
+    rightBarrier.position.set(hw + barrierWidth / 2, height / 2 + barrierHeight / 2, 0);
+    rightBarrier.rotation.x = -slopeAngle;
+    rightBarrier.material = this.sideMaterial;
+    rightBarrier.parent = ramp;
+    rightBarrier.receiveShadows = true;
+    if (this.shadowGen) this.shadowGen.addShadowCaster(rightBarrier);
 
     return ramp;
   }

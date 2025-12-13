@@ -34,6 +34,9 @@ import { createWater } from "./Water";
 import { createGrassField } from "./Grass";
 import { RampSystem } from "./track/Ramps";
 import { TrackProps } from "./track/TrackProps";
+import { SpeedPadSystem } from "./track/SpeedPads";
+import { BridgeSystem } from "./track/Bridge";
+import { applyTerrainToGround } from "./track/Terrain";
 
 export type SceneBits = {
   scene: Scene;
@@ -47,6 +50,8 @@ export type SceneBits = {
   carMesh: Mesh;
   track: Track;
   ramps: RampSystem;
+  speedPads: SpeedPadSystem;
+  bridges: BridgeSystem;
 };
 
 export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElement): Promise<SceneBits> {
@@ -202,8 +207,11 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
     motionBlur = null;
   }
 
-  // Create track with improved materials
-  const { track } = Track.createDefault(scene, shadowGen);
+  // Create track with improved materials and get ground mesh
+  const { track, ground } = Track.createDefault(scene, shadowGen);
+
+  // Apply terrain hills to ground (smooth undulations)
+  applyTerrainToGround(ground, track.centerline, track.halfWidth);
 
   // Create realistic car mesh
   const carMesh = createCarMesh(scene, shadowGen);
@@ -218,23 +226,34 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   const ramps = new RampSystem(scene, shadowGen);
 
   // Add ramps at strategic positions along the track centerline
-  // trackProgress is 0-1 representing position along track
-  ramps.addRampOnTrack(track, 0.15, 8, 14, 1.2);  // First straight
-  ramps.addRampOnTrack(track, 0.65, 8, 14, 1.2);  // Opposite straight
+  ramps.addRampOnTrack(track, 0.15, 8, 14, 1.5);  // First straight - bigger
+  ramps.addRampOnTrack(track, 0.65, 8, 14, 1.5);  // Opposite straight - bigger
+
+  // Create speed pads for nitro boost
+  const speedPads = new SpeedPadSystem(scene, track);
+  speedPads.addPadOnTrack(0.08, 6, 10);   // After start
+  speedPads.addPadOnTrack(0.35, 6, 10);   // Mid track
+  speedPads.addPadOnTrack(0.58, 6, 10);   // After second ramp
+  speedPads.addPadOnTrack(0.85, 6, 10);   // Near end
+
+  // Create bridge connecting parts of the track
+  const bridges = new BridgeSystem(scene, shadowGen);
+  bridges.addBridge(-40, 30, 40, -30, 12, 5);  // Diagonal bridge across infield
 
   // Add sponsor banners and props around the track
   const props = new TrackProps(scene, track, shadowGen);
 
-  // Add banners with company logos at various positions - larger and more visible
+  // Add banners with Opace logos - alternating two approved versions, visible from both sides
   props.addBanner(0.05, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
-  props.addBanner(0.25, 'left', 'logos/Logo - Vector.png', 7, 12);
-  props.addBanner(0.45, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
-  props.addBanner(0.55, 'left', 'logos/website design agency logo.png', 7, 12);
-  props.addBanner(0.75, 'right', 'logos/Logo - Vector.png', 7, 12);
-  props.addBanner(0.95, 'left', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.20, 'left', 'logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.35, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.50, 'left', 'logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.65, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.80, 'left', 'logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.95, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
 
   // Add logo decal to car roof
   props.addCarDecal(carMesh, 'logos/New-Opace-Logo---High-Quality new.png');
 
-  return { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps };
+  return { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps, speedPads, bridges };
 }

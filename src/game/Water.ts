@@ -19,12 +19,18 @@ export type PuddleInfo = {
   depth: number;
 };
 
+// Puddles placed on the track surface
 export const PUDDLE_POSITIONS: PuddleInfo[] = [
-  { x: 40, z: 0, width: 18, depth: 14 },
-  { x: -30, z: 45, width: 15, depth: 12 },
-  { x: 0, z: -55, width: 20, depth: 10 },
-  { x: 70, z: 30, width: 12, depth: 16 },
-  { x: -60, z: -20, width: 14, depth: 14 },
+  // On straightaways
+  { x: 0, z: 70, width: 10, depth: 8 },    // Top straight
+  { x: 0, z: -70, width: 12, depth: 8 },   // Bottom straight
+  { x: 95, z: 0, width: 8, depth: 10 },    // Right straight
+  { x: -95, z: 0, width: 8, depth: 10 },   // Left straight
+  // In corners
+  { x: 75, z: 52, width: 8, depth: 8 },    // Top-right corner
+  { x: -75, z: 52, width: 8, depth: 8 },   // Top-left corner
+  { x: 75, z: -52, width: 8, depth: 8 },   // Bottom-right corner
+  { x: -75, z: -52, width: 8, depth: 8 },  // Bottom-left corner
 ];
 
 // Check if a position is inside any water puddle

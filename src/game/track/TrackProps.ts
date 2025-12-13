@@ -96,13 +96,13 @@ export class TrackProps {
     );
     backing.position.addInPlace(backOffset);
 
-    // Create banner plane with logo - in FRONT of backing
-    const banner = MeshBuilder.CreatePlane("banner", { width, height: height * 0.8 }, this.scene);
+    // Create banner plane with logo - in FRONT of backing (visible from track side)
+    const banner = MeshBuilder.CreatePlane("banner", { width, height: height * 0.8, sideOrientation: 2 }, this.scene);
     banner.position = bannerPos.clone();
     banner.position.y = poleHeight - height * 0.4;
     banner.rotation.y = faceRotation;
 
-    // Banner material with logo - improved visibility
+    // Banner material with logo - improved visibility, double-sided
     const bannerMat = new PBRMaterial("bannerMat", this.scene);
     const logoTexture = new Texture(logoPath, this.scene);
     logoTexture.hasAlpha = true;
@@ -112,11 +112,12 @@ export class TrackProps {
     bannerMat.metallic = 0.0;
     bannerMat.useAlphaFromAlbedoTexture = true;
     bannerMat.transparencyMode = PBRMaterial.MATERIAL_ALPHABLEND;
-    bannerMat.backFaceCulling = false;
+    bannerMat.backFaceCulling = false;  // Show both sides
+    bannerMat.twoSidedLighting = true;  // Proper lighting on both sides
     // Add emissive to make logo pop
-    bannerMat.emissiveColor = new Color3(0.2, 0.2, 0.2);
+    bannerMat.emissiveColor = new Color3(0.25, 0.25, 0.25);
     bannerMat.emissiveTexture = logoTexture;
-    bannerMat.emissiveIntensity = 0.3;
+    bannerMat.emissiveIntensity = 0.4;
     banner.material = bannerMat;
 
     // Add a coloured border/frame around the banner
