@@ -6,6 +6,7 @@ import { FixedTimestep } from "./loop/FixedTimestep";
 import { InputState } from "./input/InputState";
 import { attachKeyboard } from "./input/KeyboardInput";
 import { attachGamepad } from "./input/GamepadInput";
+import { attachTouchControls, isMobileDevice, type TouchControlMode } from "./input/TouchInput";
 import { CarSim } from "./sim/CarSim";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
 import { CAMERA_VIEWS, type TelemetrySnapshot, type CameraViewId } from "../shared/telemetry";
@@ -21,6 +22,9 @@ export type GameAPI = {
   resize(): void;
   setQuality(id: QualityPresetId): void;
   setCameraView(id: CameraViewId): void;
+  setTouchControlMode(mode: TouchControlMode): void;
+  setSteeringSensitivity(value: number): void;
+  setZoomLevel(value: number): void;
   reset(): void;
   getTelemetry(): TelemetrySnapshot;
 };
@@ -32,6 +36,26 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const input = new InputState();
   const detachKeyboard = attachKeyboard(input, canvas);
   attachGamepad(input);
+
+  // Touch controls for mobile devices
+  const isMobile = isMobileDevice();
+  let touchControlMode: TouchControlMode = isMobile ? "zones" : "off";
+  const getTouchControlMode = () => touchControlMode;
+  const detachTouch = attachTouchControls(input, canvas, getTouchControlMode);
+
+  // Control sensitivity (0.3 = smooth, 1.0 = responsive, default 0.7)
+  let steeringSensitivity = 0.7;
+
+  // Zoom level for camera (1.0 = normal, 0.2 = zoomed out to see whole track)
+  let zoomLevel = 1.0;
+
+  // Mouse wheel zoom handler
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.05 : -0.05;
+    zoomLevel = Math.max(0.15, Math.min(1.5, zoomLevel + delta));
+  };
+  canvas.addEventListener("wheel", onWheel, { passive: false });
 
   const sim = new CarSim({
     wheelbase: 2.65,
@@ -184,6 +208,10 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   };
   setCameraView(cameraView);
 
+  // Camera effects state
+  let headBobTime = 0;
+  let cameraShakeIntensity = 0;
+
   const tickSim = (dt: number) => {
     try {
       const { projection, onTrack } = track.surfaceAtToRef(sim.position, projRef);
@@ -239,16 +267,22 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       const groundHeight = Math.max(rampInfo.height, bridgeInfo.height);
       const onRampOrBridge = rampInfo.onRamp || bridgeInfo.onBridge;
 
-      // Pass ground info to physics
+      // Pass ground info to physics with ramp launch data
       const groundInfo = {
         height: groundHeight,
         normal: rampInfo.normal,
-        onRamp: onRampOrBridge
+        onRamp: onRampOrBridge,
+        atRampEdge: rampInfo.atRampEdge,
+        rampDirection: rampInfo.rampDirection,
+        rampAngle: rampInfo.rampAngle
       };
+
+      // Apply steering sensitivity - lower values give smoother steering
+      const adjustedSteer = input.steer * steeringSensitivity;
 
       sim.update(
         dt,
-        { throttle: input.throttle, brake: input.brake, handbrake: input.handbrake, steer: input.steer },
+        { throttle: input.throttle, brake: input.brake, handbrake: input.handbrake, steer: adjustedSteer },
         surface,
         groundInfo
       );
@@ -430,58 +464,86 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
 
     switch (cameraView) {
       case "chase": {
-        // Chase camera - behind and above the car
+        // Chase camera - behind and above the car, respects zoom level
         const target = sim.position.add(forward.scale(4)).add(new Vector3(0, 0.8, 0));
         camera.target = Vector3.Lerp(camera.target, target, lerpFactor);
         const targetAlpha = Math.PI + sim.yawRad;
         const alphaDiff = targetAlpha - camera.alpha;
         const normDiff = Math.atan2(Math.sin(alphaDiff), Math.cos(alphaDiff));
         camera.alpha += normDiff * Math.min(1, 6 * dt);
-        camera.beta = 1.15;
-        camera.radius = 14;
+        camera.beta = 1.15 - (1 - zoomLevel) * 0.5; // More overhead when zoomed out
+        // Zoom out allows seeing whole track (radius 14-250)
+        camera.radius = 14 + (1 - zoomLevel) * 280;
         camera.fov = 0.9;
         setCarVisible(true);
         break;
       }
       case "driver": {
-        // First person from driver seat - position camera inside car cockpit
-        // Camera is at driver position, looking far ahead along forward vector
-        const driverPos = sim.position.add(forward.scale(-0.3)).add(new Vector3(0, 1.0, 0)).add(right.scale(-0.25));
-        const lookTarget = driverPos.add(forward.scale(50));
-        setArcCameraFromPositionTarget(driverPos, lookTarget, 0.85);
+        // First person from driver seat - true cockpit view with head bob and steering feel
+        // Update head bob based on speed and terrain
+        headBobTime += dt * (4 + sim.speedMps * 0.15);
+        const speedFactor = Math.min(1, sim.speedMps / 40);
+        const bobAmountY = Math.sin(headBobTime) * 0.015 * speedFactor;
+        const bobAmountX = Math.cos(headBobTime * 0.5) * 0.008 * speedFactor;
+
+        // Add subtle camera shake based on lateral acceleration (cornering)
+        const lateralShake = Math.abs(sim.accelLatMps2) * 0.003;
+        const shakeX = (Math.random() - 0.5) * lateralShake;
+        const shakeY = (Math.random() - 0.5) * lateralShake * 0.5;
+
+        // Driver sits slightly left of centre, behind windscreen
+        const driverPos = sim.position
+          .add(forward.scale(-0.1))
+          .add(new Vector3(0, 1.05 + bobAmountY + shakeY, 0))
+          .add(right.scale(-0.3 + bobAmountX + shakeX));
+
+        // Look ahead with slight steering offset for more realistic feel
+        const steerOffset = input.steer * 2; // Look slightly into turns
+        const lookTarget = driverPos.add(forward.scale(30)).add(right.scale(steerOffset));
+
+        // Wider FOV that increases with speed for sense of motion
+        const dynamicFov = 0.75 + speedFactor * 0.15;
+        setArcCameraFromPositionTarget(driverPos, lookTarget, dynamicFov, false);
         setCarVisible(false);
         break;
       }
       case "hood": {
-        // Hood camera - on the bonnet looking forward
-        const hoodPos = sim.position.add(forward.scale(1.6)).add(new Vector3(0, 0.85, 0));
-        const hoodTarget = hoodPos.add(forward.scale(50));
-        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.92);
+        // Hood camera - mounted on bonnet, looking forward over the hood
+        // Position camera lower and further back to see the hood
+        const hoodPos = sim.position.add(forward.scale(0.3)).add(new Vector3(0, 1.1, 0));
+        const hoodTarget = hoodPos.add(forward.scale(40)).add(new Vector3(0, -0.3, 0));
+        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.85);
+        // Show only front of car (hood visible, rest hidden would require mesh splitting)
         setCarVisible(true);
         break;
       }
       case "bumper": {
-        // Bumper camera - very low at front of car
-        const bumperPos = sim.position.add(forward.scale(2.0)).add(new Vector3(0, 0.3, 0));
-        const bumperTarget = bumperPos.add(forward.scale(50));
-        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.95);
-        setCarVisible(false);
+        // Bumper camera - low angle from front of car, seeing bonnet and road ahead
+        const bumperPos = sim.position.add(forward.scale(1.8)).add(new Vector3(0, 0.45, 0));
+        const bumperTarget = bumperPos.add(forward.scale(35)).add(new Vector3(0, 0.2, 0));
+        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.9);
+        // Show car - bonnet should be visible from this angle
+        setCarVisible(true);
         break;
       }
       case "orbit": {
-        // Free orbit camera - user controlled with mouse
+        // Free orbit camera - user controlled with mouse, respects zoom
         camera.target = Vector3.Lerp(camera.target, sim.position.add(new Vector3(0, 1, 0)), lerpFactor * 0.5);
+        // Apply zoom to orbit radius limits
+        camera.lowerRadiusLimit = 5 + (1 - zoomLevel) * 100;
+        camera.upperRadiusLimit = 35 + (1 - zoomLevel) * 300;
         camera.fov = 0.9;
         setCarVisible(true);
         break;
       }
       case "top": {
-        // Top down view
+        // Top down view - respects zoom for track overview
         const topTarget = sim.position.add(new Vector3(0, 0.5, 0));
         camera.target = Vector3.Lerp(camera.target, topTarget, lerpFactor);
         camera.alpha = Math.PI + sim.yawRad;
         camera.beta = 0.05;
-        camera.radius = 35;
+        // Zoom out allows seeing whole track (radius 35-350)
+        camera.radius = 35 + (1 - zoomLevel) * 350;
         camera.fov = 0.8;
         setCarVisible(true);
         break;
@@ -529,6 +591,10 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     quality,
     renderer,
     cameraView,
+    touchControlMode,
+    steeringSensitivity,
+    zoomLevel,
+    isMobile,
     input: { throttle: input.throttle, brake: input.brake, steer: input.steer, handbrake: input.handbrake },
     focus: {
       hasDocumentFocus: document.hasFocus(),
@@ -544,9 +610,31 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     }
   };
 
+  const setTouchControlMode = (mode: TouchControlMode) => {
+    touchControlMode = mode;
+  };
+
+  const setSteeringSensitivity = (value: number) => {
+    steeringSensitivity = Math.max(0.2, Math.min(1.5, value));
+  };
+
+  const setZoomLevel = (value: number) => {
+    zoomLevel = Math.max(0.15, Math.min(1.5, value));
+  };
+
   // keep a strong ref for devtools inspection
   void scene;
   (window as any).__apexGame = { engine, scene, sim, track };
 
-  return { start, resize, setQuality, setCameraView, reset, getTelemetry };
+  return {
+    start,
+    resize,
+    setQuality,
+    setCameraView,
+    setTouchControlMode,
+    setSteeringSensitivity,
+    setZoomLevel,
+    reset,
+    getTelemetry
+  };
 }

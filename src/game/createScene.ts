@@ -229,12 +229,12 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   ramps.addRampOnTrack(track, 0.15, 8, 14, 1.5);  // First straight - bigger
   ramps.addRampOnTrack(track, 0.65, 8, 14, 1.5);  // Opposite straight - bigger
 
-  // Create speed pads for nitro boost
+  // Create speed pads for nitro boost - spaced well away from water puddles
   const speedPads = new SpeedPadSystem(scene, track);
-  speedPads.addPadOnTrack(0.08, 6, 10);   // After start
-  speedPads.addPadOnTrack(0.35, 6, 10);   // Mid track
-  speedPads.addPadOnTrack(0.58, 6, 10);   // After second ramp
-  speedPads.addPadOnTrack(0.85, 6, 10);   // Near end
+  speedPads.addPadOnTrack(0.05, 6, 10);   // After start - away from water
+  speedPads.addPadOnTrack(0.28, 6, 10);   // Before first corner - away from water
+  speedPads.addPadOnTrack(0.52, 6, 10);   // Mid opposite straight
+  speedPads.addPadOnTrack(0.78, 6, 10);   // Before final corner
 
   // Create bridge connecting parts of the track
   const bridges = new BridgeSystem(scene, shadowGen);

@@ -18,6 +18,9 @@ export type GroundInfo = {
   height: number;
   normal: Vector3;
   onRamp: boolean;
+  atRampEdge?: boolean;
+  rampDirection?: Vector3;
+  rampAngle?: number;
 };
 
 export class CarSim {
@@ -207,11 +210,16 @@ export class CarSim {
       const len = this.tmpVel.length();
       if (len > max) this.tmpVel.scaleInPlace(max / len);
 
-      // Keep y velocity if on ramp
-      if (ground.onRamp) {
-        // Add upward velocity based on ramp slope and forward speed
-        const slopeBoost = vF2 * ground.normal.z * -0.5;
-        this.tmpVel.y = slopeBoost;
+      // Ramp jump physics - launch when at edge of ramp
+      if (ground.onRamp && ground.atRampEdge && ground.rampAngle && vF2 > 8) {
+        // At the top of the ramp - apply launch velocity based on speed and ramp angle
+        const launchMultiplier = 0.35;  // How much forward speed converts to upward velocity
+        const upwardVelocity = vF2 * Math.sin(ground.rampAngle) * launchMultiplier;
+        this.tmpVel.y = Math.max(upwardVelocity, 4);  // Minimum upward velocity for satisfying jump
+      } else if (ground.onRamp) {
+        // On ramp but not at edge - follow the slope smoothly
+        const slopeFollow = vF2 * Math.sin(ground.rampAngle || 0) * 0.15;
+        this.tmpVel.y = slopeFollow;
       } else {
         this.tmpVel.y = 0;
       }

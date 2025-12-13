@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { GameAPI } from "../game/Game";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
-import { CAMERA_VIEWS, type CameraViewId, type TelemetrySnapshot } from "../shared/telemetry";
+import { CAMERA_VIEWS, TOUCH_CONTROL_MODES, type CameraViewId, type TelemetrySnapshot, type TouchControlMode } from "../shared/telemetry";
 
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
@@ -13,6 +13,9 @@ export function App({ game }: { game: GameAPI }) {
   const [t, setT] = useState<TelemetrySnapshot>(() => game.getTelemetry());
   const [quality, setQuality] = useState<QualityPresetId>(t.quality);
   const [cameraView, setCameraView] = useState<CameraViewId>(t.cameraView);
+  const [touchMode, setTouchMode] = useState<TouchControlMode>(t.touchControlMode);
+  const [sensitivity, setSensitivity] = useState<number>(t.steeringSensitivity);
+  const [zoom, setZoom] = useState<number>(t.zoomLevel);
 
   const presets = useMemo(() => QUALITY_PRESETS, []);
 
@@ -28,6 +31,18 @@ export function App({ game }: { game: GameAPI }) {
   useEffect(() => {
     game.setCameraView(cameraView);
   }, [game, cameraView]);
+
+  useEffect(() => {
+    game.setTouchControlMode(touchMode);
+  }, [game, touchMode]);
+
+  useEffect(() => {
+    game.setSteeringSensitivity(sensitivity);
+  }, [game, sensitivity]);
+
+  useEffect(() => {
+    game.setZoomLevel(zoom);
+  }, [game, zoom]);
 
   return (
     <div className="ui">
@@ -110,11 +125,57 @@ export function App({ game }: { game: GameAPI }) {
         <button onClick={() => game.reset()}>Reset (R)</button>
       </div>
 
+      <div className="controls">
+        <label>
+          Touch Controls
+          <select value={touchMode} onChange={(e) => setTouchMode(e.target.value as TouchControlMode)}>
+            {TOUCH_CONTROL_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Sensitivity: {sensitivity.toFixed(1)}
+          <input
+            type="range"
+            min="0.2"
+            max="1.5"
+            step="0.1"
+            value={sensitivity}
+            onChange={(e) => setSensitivity(parseFloat(e.target.value))}
+            style={{ width: 80 }}
+          />
+        </label>
+        <label>
+          Zoom: {zoom.toFixed(1)}x
+          <input
+            type="range"
+            min="0.15"
+            max="1.5"
+            step="0.05"
+            value={zoom}
+            onChange={(e) => setZoom(parseFloat(e.target.value))}
+            style={{ width: 80 }}
+          />
+        </label>
+      </div>
+
       <div className="hint">
         <div>
-          Drive: <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd>, Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset, <kbd>C</kbd> camera
+          <b>Keyboard:</b> <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> or Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset, <kbd>C</kbd> camera
         </div>
-        <div style={{ marginTop: 6 }}>Tip: WebGPU + High/Ultra looks best; Medium/Low improves laptops.</div>
+        <div style={{ marginTop: 4 }}>
+          <b>Zoom:</b> Mouse wheel to zoom in/out (see whole track at min zoom)
+        </div>
+        {t.isMobile && (
+          <div style={{ marginTop: 4 }}>
+            <b>Touch:</b> {touchMode === "zones" ? "Tap left/right to steer, top/bottom for throttle/brake" :
+              touchMode === "dpad" ? "Use virtual D-pad (left) and buttons (right)" : "Touch controls disabled"}
+          </div>
+        )}
+        <div style={{ marginTop: 6 }}>Tip: Lower sensitivity for smoother steering. WebGPU + High/Ultra looks best.</div>
       </div>
     </div>
   );

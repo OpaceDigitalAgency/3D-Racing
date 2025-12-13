@@ -221,7 +221,7 @@ export class RampSystem {
   }
 
   // Get height at a position (for physics) - car must approach from correct direction
-  getHeightAt(pos: Vector3, carYaw: number): { height: number; normal: Vector3; onRamp: boolean; sideCollision: boolean } {
+  getHeightAt(pos: Vector3, carYaw: number): { height: number; normal: Vector3; onRamp: boolean; sideCollision: boolean; atRampEdge: boolean; rampDirection: Vector3; rampAngle: number } {
     for (const ramp of this.ramps) {
       const dx = pos.x - ramp.position.x;
       const dz = pos.z - ramp.position.z;
@@ -246,7 +246,10 @@ export class RampSystem {
           height: 0,
           normal: new Vector3(localX > 0 ? 1 : -1, 0, 0),
           onRamp: false,
-          sideCollision: true
+          sideCollision: true,
+          atRampEdge: false,
+          rampDirection: new Vector3(0, 0, 1),
+          rampAngle: 0
         };
       }
 
@@ -266,7 +269,10 @@ export class RampSystem {
             height: 0,
             normal: new Vector3(0, 0, 1),
             onRamp: false,
-            sideCollision: true
+            sideCollision: true,
+            atRampEdge: false,
+            rampDirection: new Vector3(0, 0, 1),
+            rampAngle: 0
           };
         }
 
@@ -279,16 +285,37 @@ export class RampSystem {
         const worldNx = nzLocal * Math.sin(ramp.rotation);
         const worldNz = nzLocal * Math.cos(ramp.rotation);
 
+        // Check if at the launch edge of the ramp (top 15% of ramp)
+        const atRampEdge = t > 0.85 && approachingCorrectly;
+
+        // Calculate ramp direction in world space
+        const rampDirection = new Vector3(
+          Math.sin(ramp.rotation),
+          0,
+          Math.cos(ramp.rotation)
+        );
+
         return {
           height,
           normal: new Vector3(worldNx, ny, worldNz).normalize(),
           onRamp: true,
-          sideCollision: false
+          sideCollision: false,
+          atRampEdge,
+          rampDirection,
+          rampAngle: slopeAngle
         };
       }
     }
 
-    return { height: 0, normal: new Vector3(0, 1, 0), onRamp: false, sideCollision: false };
+    return {
+      height: 0,
+      normal: new Vector3(0, 1, 0),
+      onRamp: false,
+      sideCollision: false,
+      atRampEdge: false,
+      rampDirection: new Vector3(0, 0, 1),
+      rampAngle: 0
+    };
   }
 }
 

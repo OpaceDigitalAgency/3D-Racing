@@ -19,18 +19,18 @@ export type PuddleInfo = {
   depth: number;
 };
 
-// Puddles placed on the track surface
+// Puddles placed on the track surface - positioned away from speed pads
 export const PUDDLE_POSITIONS: PuddleInfo[] = [
-  // On straightaways
-  { x: 0, z: 70, width: 10, depth: 8 },    // Top straight
-  { x: 0, z: -70, width: 12, depth: 8 },   // Bottom straight
-  { x: 95, z: 0, width: 8, depth: 10 },    // Right straight
-  { x: -95, z: 0, width: 8, depth: 10 },   // Left straight
-  // In corners
-  { x: 75, z: 52, width: 8, depth: 8 },    // Top-right corner
-  { x: -75, z: 52, width: 8, depth: 8 },   // Top-left corner
-  { x: 75, z: -52, width: 8, depth: 8 },   // Bottom-right corner
-  { x: -75, z: -52, width: 8, depth: 8 },  // Bottom-left corner
+  // On straightaways - offset from centre to avoid speed pads
+  { x: 15, z: 60, width: 10, depth: 8 },    // Top straight - offset right
+  { x: -15, z: -55, width: 12, depth: 8 },  // Bottom straight - offset left
+  { x: 90, z: 20, width: 8, depth: 10 },    // Right straight - offset forward
+  { x: -90, z: -20, width: 8, depth: 10 },  // Left straight - offset back
+  // In corners - deeper into corners, away from any pads
+  { x: 65, z: 58, width: 8, depth: 8 },     // Top-right corner - more into corner
+  { x: -65, z: 58, width: 8, depth: 8 },    // Top-left corner - more into corner
+  { x: 68, z: -58, width: 8, depth: 8 },    // Bottom-right corner
+  { x: -68, z: -55, width: 8, depth: 8 },   // Bottom-left corner
 ];
 
 // Check if a position is inside any water puddle
