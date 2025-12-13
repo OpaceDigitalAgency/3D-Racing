@@ -217,21 +217,21 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   underGlow.material = underGlowMat;
   underGlow.parent = carRoot;
 
-  // Merge all meshes into one for performance
+  // Collect all meshes for shadows
   const allMeshes: Mesh[] = [];
   carRoot.getChildMeshes().forEach(m => {
     if (m instanceof Mesh) allMeshes.push(m);
   });
 
-  // Create a simple bounding box as the main mesh for physics/position reference
-  const carMesh = CreateBox("car", { width: 1.9, height: 0.8, depth: 4.5 }, scene);
-  carMesh.position = new Vector3(0, 0.55, 0);
+  // Create an empty mesh as the car anchor (no visible geometry)
+  const carMesh = new Mesh("car", scene);
+  carMesh.position = new Vector3(0, 0.45, 0);
   carMesh.rotationQuaternion = Quaternion.Identity();
-  carMesh.isVisible = false; // Hide the physics box
+  // This mesh has no geometry, so nothing to render
 
-  // Parent all car parts to the main mesh
+  // Parent all car parts to the anchor mesh
   carRoot.parent = carMesh;
-  carRoot.position = new Vector3(0, -0.1, 0);
+  carRoot.position = Vector3.Zero();
 
   // Add shadow casters
   allMeshes.forEach(m => {

@@ -11,6 +11,8 @@ import { CarSim } from "./sim/CarSim";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
 import { CAMERA_VIEWS, type TelemetrySnapshot, type CameraViewId } from "../shared/telemetry";
 import type { ProjectionRef } from "./track/Track";
+import { DamageSystem, createCrashParticles, triggerCrashEffect, applyVisualDamage, createSmokeParticles } from "./effects/CrashEffects";
+import { ExhaustFireSystem } from "./effects/ExhaustFire";
 
 type CreateGameArgs = { canvas: HTMLCanvasElement };
 
@@ -25,7 +27,7 @@ export type GameAPI = {
 
 export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const { engine, renderer } = await createEngine(canvas);
-  const { scene, camera, shadowGen, pipeline, carMesh, track } = await createScene(engine, canvas);
+  const { scene, camera, shadowGen, pipeline, carMesh, track, ramps } = await createScene(engine, canvas);
 
   const input = new InputState();
   const detachKeyboard = attachKeyboard(input, canvas);
@@ -46,6 +48,15 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   });
 
   const fixed = new FixedTimestep(1 / 120);
+
+  // Damage and effects systems
+  const damageSystem = new DamageSystem();
+  const crashParticles = createCrashParticles(scene);
+  const smokeParticles = createSmokeParticles(scene);
+  const exhaustFire = new ExhaustFireSystem(scene, carMesh);
+
+  // Collision cooldown to prevent rapid damage
+  let collisionCooldown = 0;
 
   let quality: QualityPresetId = "high";
   const applyQuality = (id: QualityPresetId) => {
@@ -119,10 +130,41 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       ? { grip: 1.0, dragScale: 1.0 }
       : { grip: sim.params.offroadGripScale, dragScale: sim.params.offroadDragScale };
 
+    // Get ramp height at current position
+    const rampInfo = ramps.getHeightAt(sim.position, sim.yawRad);
+
+    // Handle side collision with ramp barriers
+    if (rampInfo.sideCollision) {
+      const impactSpeed = sim.speedMps * 3.6;
+      const damageAmount = Math.max(0, (impactSpeed - 15) * 0.4);
+
+      if (damageAmount > 0) {
+        damageSystem.addDamage(damageAmount);
+        triggerCrashEffect(crashParticles, sim.position, impactSpeed / 15);
+        applyVisualDamage(carMesh, damageSystem.damagePercent);
+      }
+
+      // Bounce off the side
+      const bounceNormal = rampInfo.normal;
+      const vn = Vector3.Dot(sim.velocity, bounceNormal);
+      if (vn < 0) {
+        sim.velocity.addInPlace(bounceNormal.scale(-vn * 1.5));
+        sim.velocity.scaleInPlace(0.6);
+      }
+    }
+
+    // Pass ground info to physics
+    const groundInfo = {
+      height: rampInfo.height,
+      normal: rampInfo.normal,
+      onRamp: rampInfo.onRamp
+    };
+
     sim.update(
       dt,
       { throttle: input.throttle, brake: input.brake, handbrake: input.handbrake, steer: input.steer },
-      surface
+      surface,
+      groundInfo
     );
 
     // Soft constraint: allow driving on grass but push back if way too far outside
@@ -139,6 +181,63 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         sim.velocity.addInPlace(tmpVec);
       }
     }
+
+    // Barrier collision detection
+    if (collisionCooldown > 0) {
+      collisionCooldown -= dt;
+    } else {
+      const collision = track.checkBarrierCollision(sim.position, sim.yawRad, sim.velocity);
+      if (collision.collided) {
+        // Calculate impact damage based on speed
+        const impactSpeed = collision.impactSpeed * 3.6; // Convert to km/h
+        const damageAmount = Math.max(0, (impactSpeed - 10) * 0.5); // No damage below 10 km/h
+
+        if (damageAmount > 0) {
+          damageSystem.addDamage(damageAmount);
+
+          // Trigger crash particles
+          const crashPos = sim.position.add(collision.normal.scale(-1.5));
+          triggerCrashEffect(crashParticles, crashPos, impactSpeed / 10);
+
+          // Apply visual damage to car
+          applyVisualDamage(carMesh, damageSystem.damagePercent);
+        }
+
+        // Push car out of barrier
+        sim.position.addInPlace(collision.normal.scale(collision.penetration + 0.1));
+
+        // Bounce velocity off barrier (with energy loss)
+        const bounceAmount = Vector3.Dot(sim.velocity, collision.normal);
+        if (bounceAmount < 0) {
+          const restitution = 0.3; // Bounce factor
+          const friction = 0.7; // Friction on impact
+          collision.normal.scaleToRef(-bounceAmount * (1 + restitution), tmpVec);
+          sim.velocity.addInPlace(tmpVec);
+          sim.velocity.scaleInPlace(friction);
+        }
+
+        collisionCooldown = 0.15; // Prevent rapid collisions
+      }
+    }
+
+    // Update smoke for heavy damage
+    if (damageSystem.damagePercent > 0.5) {
+      const smokePos = sim.position.add(sim.forwardVec.scale(1.5)).add(new Vector3(0, 0.8, 0));
+      smokeParticles.emitter = smokePos;
+      smokeParticles.emitRate = damageSystem.damagePercent * 30;
+    } else {
+      smokeParticles.emitRate = 0;
+    }
+
+    // Update exhaust fire
+    exhaustFire.update(
+      sim.position,
+      sim.forwardVec,
+      sim.rightVec,
+      sim.yawRad,
+      input.throttle,
+      sim.speedMps
+    );
 
     // Lap: wrap around track s coordinate while moving forward
     const s = projection.s;
@@ -174,6 +273,11 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       sim.reset();
       sim.position.set(startPos.x, 0.55, startPos.z);
       sim.yawRad = yaw;
+
+      // Reset damage
+      damageSystem.reset();
+      applyVisualDamage(carMesh, 0);
+      smokeParticles.emitRate = 0;
     }
 
     // Cycle camera view with C key
@@ -186,7 +290,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
 
     // Apply to visuals
     carMesh.position.copyFrom(sim.position);
-    Quaternion.FromEulerAnglesToRef(0, sim.yawRad, 0, carRot);
+    // Apply both yaw and pitch rotation for ramps/jumps
+    Quaternion.FromEulerAnglesToRef(sim.pitchRad, sim.yawRad, 0, carRot);
     carMesh.rotationQuaternion?.copyFrom(carRot);
 
     // Camera positioning based on view mode
@@ -209,35 +314,29 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         break;
       }
       case "driver": {
-        // First person from driver seat
-        const driverPos = sim.position.add(forward.scale(0.3)).add(new Vector3(0, 1.4, 0)).add(right.scale(-0.35));
-        camera.target = driverPos.add(forward.scale(50));
-        camera.position = Vector3.Lerp(camera.position, driverPos, lerpFactor * 2);
-        camera.alpha = Math.PI + sim.yawRad;
-        camera.beta = Math.PI / 2;
-        camera.radius = 0.01;
+        // First person from driver seat - position camera inside car cockpit
+        const driverPos = sim.position.add(forward.scale(-0.5)).add(new Vector3(0, 1.1, 0)).add(right.scale(-0.3));
+        const lookTarget = driverPos.add(forward.scale(100));
+        camera.position.copyFrom(driverPos);
+        camera.setTarget(lookTarget);
         carMesh.isVisible = false;
         break;
       }
       case "hood": {
-        // Hood camera - front of car looking forward
-        const hoodPos = sim.position.add(forward.scale(2.0)).add(new Vector3(0, 1.2, 0));
-        camera.target = hoodPos.add(forward.scale(50));
-        camera.position = Vector3.Lerp(camera.position, hoodPos, lerpFactor * 2);
-        camera.alpha = Math.PI + sim.yawRad;
-        camera.beta = Math.PI / 2;
-        camera.radius = 0.01;
+        // Hood camera - on the bonnet looking forward
+        const hoodPos = sim.position.add(forward.scale(1.8)).add(new Vector3(0, 0.9, 0));
+        const hoodTarget = hoodPos.add(forward.scale(100));
+        camera.position.copyFrom(hoodPos);
+        camera.setTarget(hoodTarget);
         carMesh.isVisible = true;
         break;
       }
       case "bumper": {
         // Bumper camera - very low at front of car
-        const bumperPos = sim.position.add(forward.scale(2.3)).add(new Vector3(0, 0.4, 0));
-        camera.target = bumperPos.add(forward.scale(50));
-        camera.position = Vector3.Lerp(camera.position, bumperPos, lerpFactor * 2);
-        camera.alpha = Math.PI + sim.yawRad;
-        camera.beta = Math.PI / 2;
-        camera.radius = 0.01;
+        const bumperPos = sim.position.add(forward.scale(2.2)).add(new Vector3(0, 0.35, 0));
+        const bumperTarget = bumperPos.add(forward.scale(100));
+        camera.position.copyFrom(bumperPos);
+        camera.setTarget(bumperTarget);
         carMesh.isVisible = false;
         break;
       }

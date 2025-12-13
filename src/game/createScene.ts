@@ -27,6 +27,8 @@ import { Track } from "./track/Track";
 import { createCarMesh } from "./CarMesh";
 import { createWater } from "./Water";
 import { createGrassField } from "./Grass";
+import { RampSystem } from "./track/Ramps";
+import { TrackProps } from "./track/TrackProps";
 
 export type SceneBits = {
   scene: Scene;
@@ -35,6 +37,7 @@ export type SceneBits = {
   pipeline: DefaultRenderingPipeline;
   carMesh: Mesh;
   track: Track;
+  ramps: RampSystem;
 };
 
 export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElement): Promise<SceneBits> {
@@ -147,5 +150,27 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   // Create water puddles on track
   createWater(scene, track);
 
-  return { scene, camera, shadowGen, pipeline, carMesh, track };
+  // Create ramps and jumps on the track
+  const ramps = new RampSystem(scene, shadowGen);
+
+  // Add ramps at strategic positions along the track centerline
+  // trackProgress is 0-1 representing position along track
+  ramps.addRampOnTrack(track, 0.15, 8, 14, 1.2);  // First straight
+  ramps.addRampOnTrack(track, 0.65, 8, 14, 1.2);  // Opposite straight
+
+  // Add sponsor banners and props around the track
+  const props = new TrackProps(scene, track, shadowGen);
+
+  // Add banners with company logos at various positions
+  props.addBanner(0.05, 'right', 'logos/transparent logo small.png', 4, 5);
+  props.addBanner(0.25, 'left', 'logos/New-Opace-Logo---High-Quality new.png', 3.5, 5);
+  props.addBanner(0.45, 'right', 'logos/website design agency logo.png', 4, 6);
+  props.addBanner(0.55, 'left', 'logos/transparent logo small.png', 4, 5);
+  props.addBanner(0.75, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 3.5, 5);
+  props.addBanner(0.95, 'left', 'logos/Logo - Vector.png', 4, 5);
+
+  // Add logo decal to car roof
+  props.addCarDecal(carMesh, 'logos/transparent logo small.png');
+
+  return { scene, camera, shadowGen, pipeline, carMesh, track, ramps };
 }

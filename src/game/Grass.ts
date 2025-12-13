@@ -73,31 +73,78 @@ void main() {
 }
 `;
 
+// Check if a point is on the track (using track centerline approximation)
+function isOnTrack(x: number, z: number, trackHalfWidth: number = 10): boolean {
+  // Track is a rounded rectangle: halfX=95, halfZ=70, corner radius=22
+  const halfX = 95;
+  const halfZ = 70;
+  const cornerR = 22;
+  const margin = trackHalfWidth + 1; // Extra margin for grass buffer
+
+  // Calculate distance to the rounded rectangle centerline
+  // For each corner, check if within corner arc
+  const absX = Math.abs(x);
+  const absZ = Math.abs(z);
+
+  // Inner straight sections
+  const innerHalfX = halfX - cornerR;
+  const innerHalfZ = halfZ - cornerR;
+
+  let distToCenterline: number;
+
+  // Check which section we're in
+  if (absX <= innerHalfX && absZ <= halfZ) {
+    // Top or bottom straight - distance to horizontal line
+    distToCenterline = Math.abs(absZ - halfZ);
+    if (absZ < halfZ - margin && absZ > innerHalfZ) {
+      distToCenterline = Math.min(distToCenterline, Math.abs(absX - halfX));
+    }
+  } else if (absZ <= innerHalfZ && absX <= halfX) {
+    // Left or right straight - distance to vertical line
+    distToCenterline = Math.abs(absX - halfX);
+  } else if (absX > innerHalfX && absZ > innerHalfZ) {
+    // Corner region - distance to corner arc center
+    const cornerCenterX = innerHalfX;
+    const cornerCenterZ = innerHalfZ;
+    const distToCornerCenter = Math.sqrt(
+      (absX - cornerCenterX) * (absX - cornerCenterX) +
+      (absZ - cornerCenterZ) * (absZ - cornerCenterZ)
+    );
+    distToCenterline = Math.abs(distToCornerCenter - cornerR);
+  } else {
+    // Outside track bounds
+    return false;
+  }
+
+  return distToCenterline < margin;
+}
+
 export function createGrassField(scene: Scene, shadowGen: ShadowGenerator | null): Mesh {
   // Create grass blade geometry
-  const bladeCount = 25000;
-  const fieldRadius = 120;
-  const innerClearRadius = 15; // Clear area around track centre
-  
+  const bladeCount = 35000;
+  const fieldRadius = 140;
+  const innerClearRadius = 12;
+
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
-  
+
   let vertexIndex = 0;
-  
-  for (let i = 0; i < bladeCount; i++) {
+  let placedBlades = 0;
+  const maxAttempts = bladeCount * 3;
+
+  for (let i = 0; i < maxAttempts && placedBlades < bladeCount; i++) {
     // Random position in field
     const angle = Math.random() * Math.PI * 2;
     const radius = innerClearRadius + Math.random() * (fieldRadius - innerClearRadius);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    
-    // Skip if too close to track centre area
-    if (Math.abs(x) < 85 && Math.abs(z) < 60 && Math.abs(x) > 10 && Math.abs(z) > 10) {
-      // This is roughly the track area - still place some grass here
-      if (Math.random() > 0.3) continue;
+
+    // Skip if on the track - NO grass on the road!
+    if (isOnTrack(x, z, 10)) {
+      continue;
     }
     
     // Grass blade properties
@@ -137,6 +184,7 @@ export function createGrassField(scene: Scene, shadowGen: ShadowGenerator | null
     // Triangle
     indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
     vertexIndex += 3;
+    placedBlades++;
   }
   
   // Create mesh

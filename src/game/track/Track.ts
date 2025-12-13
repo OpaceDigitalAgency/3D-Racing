@@ -141,11 +141,29 @@ function buildRoundedRectPath(halfX: number, halfZ: number, radius: number, corn
   return pts;
 }
 
+// Barrier collision info
+export type BarrierInfo = {
+  position: Vector3;
+  rotation: number;
+  width: number;
+  depth: number;
+};
+
+// Collision result
+export type CollisionResult = {
+  collided: boolean;
+  barrier: BarrierInfo | null;
+  normal: Vector3;
+  penetration: number;
+  impactSpeed: number;
+};
+
 export class Track {
   readonly centerline: readonly Vector3[];
   readonly halfWidth: number;
   readonly totalLength: number;
   readonly cumulative: readonly number[];
+  readonly barriers: BarrierInfo[] = [];
 
   constructor(centerline: readonly Vector3[], halfWidth: number) {
     this.centerline = centerline;
@@ -159,6 +177,90 @@ export class Track {
     }
     this.cumulative = cumulative;
     this.totalLength = len;
+  }
+
+  addBarrier(pos: Vector3, rotation: number, width: number, depth: number) {
+    this.barriers.push({ position: pos.clone(), rotation, width, depth });
+  }
+
+  // Check collision with barriers using oriented bounding box
+  checkBarrierCollision(carPos: Vector3, carYaw: number, velocity: Vector3): CollisionResult {
+    const carHalfWidth = 1.0;  // Half car width
+    const carHalfDepth = 2.3;  // Half car length
+    const result: CollisionResult = {
+      collided: false,
+      barrier: null,
+      normal: new Vector3(0, 0, 0),
+      penetration: 0,
+      impactSpeed: 0
+    };
+
+    for (const barrier of this.barriers) {
+      // Quick distance check first
+      const dx = carPos.x - barrier.position.x;
+      const dz = carPos.z - barrier.position.z;
+      const dist2 = dx * dx + dz * dz;
+      const maxDist = carHalfDepth + barrier.depth + 2;
+      if (dist2 > maxDist * maxDist) continue;
+
+      // Separating axis test for OBB vs OBB
+      const cos1 = Math.cos(carYaw);
+      const sin1 = Math.sin(carYaw);
+      const cos2 = Math.cos(barrier.rotation);
+      const sin2 = Math.sin(barrier.rotation);
+
+      // Car axes
+      const carAxisX = new Vector3(cos1, 0, -sin1);
+      const carAxisZ = new Vector3(sin1, 0, cos1);
+      // Barrier axes
+      const barAxisX = new Vector3(cos2, 0, -sin2);
+      const barAxisZ = new Vector3(sin2, 0, cos2);
+
+      // Relative position
+      const relPos = new Vector3(dx, 0, dz);
+
+      // Check all 4 axes
+      const axes = [carAxisX, carAxisZ, barAxisX, barAxisZ];
+      const carExtents = [carHalfWidth, carHalfDepth, carHalfWidth, carHalfDepth];
+      const barExtents = [barrier.width / 2, barrier.depth / 2, barrier.width / 2, barrier.depth / 2];
+
+      let minPenetration = Infinity;
+      let collisionNormal = new Vector3(0, 0, 0);
+      let separated = false;
+
+      for (let i = 0; i < 4; i++) {
+        const axis = axes[i];
+        // Project car onto axis
+        const carProj = Math.abs(Vector3.Dot(carAxisX, axis)) * carHalfWidth +
+                        Math.abs(Vector3.Dot(carAxisZ, axis)) * carHalfDepth;
+        // Project barrier onto axis
+        const barProj = Math.abs(Vector3.Dot(barAxisX, axis)) * barrier.width / 2 +
+                        Math.abs(Vector3.Dot(barAxisZ, axis)) * barrier.depth / 2;
+        // Project relative position onto axis
+        const relProj = Math.abs(Vector3.Dot(relPos, axis));
+
+        const overlap = carProj + barProj - relProj;
+        if (overlap <= 0) {
+          separated = true;
+          break;
+        }
+        if (overlap < minPenetration) {
+          minPenetration = overlap;
+          collisionNormal = axis.scale(Vector3.Dot(relPos, axis) > 0 ? 1 : -1);
+        }
+      }
+
+      if (!separated) {
+        result.collided = true;
+        result.barrier = barrier;
+        result.normal = collisionNormal;
+        result.penetration = minPenetration;
+        result.impactSpeed = Math.abs(Vector3.Dot(velocity, collisionNormal));
+        return result;
+      }
+    }
+
+    return result;
   }
 
   projectToRef(pos: Vector3, out: ProjectionRef): ProjectionRef {
@@ -299,10 +401,12 @@ export class Track {
     barrierMat.roughness = 0.6;
     barrierMat.metallic = 0.3;
 
-    const barrierProto = CreateBox("barrierProto", { width: 1.1, height: 1.25, depth: 2.2 }, scene);
+    const barrierWidth = 1.1;
+    const barrierDepth = 2.2;
+    const barrierProto = CreateBox("barrierProto", { width: barrierWidth, height: 1.25, depth: barrierDepth }, scene);
     barrierProto.material = barrierMat;
     barrierProto.isVisible = false;
-    barrierProto.receiveShadows = true; // Instances inherit shadow receiving from prototype
+    barrierProto.receiveShadows = true;
 
     const placeBarriers = (side: 1 | -1) => {
       const spacing = 4.0;
@@ -317,11 +421,16 @@ export class Track {
         for (let j = 0; j < count; j++) {
           const t = j / count;
           const p = a.add(seg.scale(t)).add(n);
+          const rot = Math.atan2(dir.x, dir.z);
+
           const inst = barrierProto.createInstance(`barrier_${side}_${i}_${j}`);
           inst.isVisible = true;
           inst.position.set(p.x, 0.62, p.z);
-          inst.rotation.y = Math.atan2(dir.x, dir.z);
-          // Note: receiveShadows has no effect on instanced meshes - shadows are inherited from prototype
+          inst.rotation.y = rot;
+
+          // Register barrier for collision detection
+          track.addBarrier(new Vector3(p.x, 0, p.z), rot, barrierWidth, barrierDepth);
+
           if (shadowGen) {
             shadowGen.addShadowCaster(inst);
           }
