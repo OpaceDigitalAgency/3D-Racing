@@ -26,6 +26,7 @@ import "@babylonjs/core/Materials/Textures/Loaders/envTextureLoader";
 import { Track } from "./track/Track";
 import { createCarMesh } from "./CarMesh";
 import { createWater } from "./Water";
+import { createGrassField } from "./Grass";
 
 export type SceneBits = {
   scene: Scene;
@@ -57,32 +58,36 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   camera.wheelPrecision = 15;
   camera.pinchPrecision = 50;
 
-  // Improved lighting for realism
+  // Enhanced lighting for photorealistic look
   const hemi = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
-  hemi.intensity = 0.35;
-  hemi.groundColor = new Color3(0.15, 0.12, 0.1);
-  hemi.diffuse = new Color3(0.85, 0.92, 1.0);
+  hemi.intensity = 0.45;
+  hemi.groundColor = new Color3(0.2, 0.18, 0.15);
+  hemi.diffuse = new Color3(0.9, 0.95, 1.0);
 
-  const sun = new DirectionalLight("sun", new Vector3(-0.35, -0.85, -0.2).normalize(), scene);
-  sun.position = new Vector3(100, 150, 100);
-  sun.intensity = 2.8;
-  sun.diffuse = new Color3(1.0, 0.98, 0.92);
-  sun.specular = new Color3(1.0, 0.95, 0.85);
+  // Main sun light - golden hour warm light
+  const sun = new DirectionalLight("sun", new Vector3(-0.4, -0.75, -0.3).normalize(), scene);
+  sun.position = new Vector3(150, 200, 120);
+  sun.intensity = 3.2;
+  sun.diffuse = new Color3(1.0, 0.95, 0.85);
+  sun.specular = new Color3(1.0, 0.98, 0.9);
 
+  // High quality shadows
   const shadowGen = new ShadowGenerator(4096, sun);
   shadowGen.useBlurExponentialShadowMap = true;
-  shadowGen.blurKernel = 32;
-  shadowGen.bias = 0.00005;
-  shadowGen.normalBias = 0.015;
-  shadowGen.darkness = 0.35;
+  shadowGen.blurKernel = 48;
+  shadowGen.bias = 0.00003;
+  shadowGen.normalBias = 0.012;
+  shadowGen.darkness = 0.3;
+  shadowGen.useContactHardeningShadow = true;
+  shadowGen.contactHardeningLightSizeUVRatio = 0.05;
 
   // HDR environment for realistic reflections
   const env = CubeTexture.CreateFromPrefilteredData("/env/environmentSpecular.env", scene);
   scene.environmentTexture = env;
-  scene.environmentIntensity = 1.2;
+  scene.environmentIntensity = 1.5;
 
-  // Create skybox from environment texture
-  const skybox = MeshBuilder.CreateBox("skyBox", { size: 1000 }, scene);
+  // Create high quality skybox from environment texture
+  const skybox = MeshBuilder.CreateBox("skyBox", { size: 2000 }, scene);
   const skyboxMat = new PBRMaterial("skyBoxMat", scene);
   skyboxMat.backFaceCulling = false;
   skyboxMat.reflectionTexture = env.clone();
@@ -93,34 +98,40 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   skybox.material = skyboxMat;
   skybox.infiniteDistance = true;
 
+  // Enable fog for atmospheric depth
+  scene.fogMode = Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0008;
+  scene.fogColor = new Color3(0.75, 0.82, 0.92);
+
   // Enhanced image processing for photorealistic look
   scene.imageProcessingConfiguration.toneMappingEnabled = true;
   scene.imageProcessingConfiguration.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
-  scene.imageProcessingConfiguration.exposure = 1.0;
-  scene.imageProcessingConfiguration.contrast = 1.15;
+  scene.imageProcessingConfiguration.exposure = 1.1;
+  scene.imageProcessingConfiguration.contrast = 1.2;
   scene.imageProcessingConfiguration.vignetteEnabled = true;
-  scene.imageProcessingConfiguration.vignetteWeight = 1.5;
-  scene.imageProcessingConfiguration.vignetteStretch = 0.5;
+  scene.imageProcessingConfiguration.vignetteWeight = 2.0;
+  scene.imageProcessingConfiguration.vignetteStretch = 0.6;
   scene.imageProcessingConfiguration.vignetteColor = new Color4(0, 0, 0, 0);
-  scene.imageProcessingConfiguration.vignetteCameraFov = 0.5;
+  scene.imageProcessingConfiguration.vignetteCameraFov = 0.4;
 
-  // Enhanced post-processing pipeline
+  // High quality post-processing pipeline
   const pipeline = new DefaultRenderingPipeline("pipe", true, scene, [camera]);
-  pipeline.samples = 4;
+  pipeline.samples = 8; // Higher MSAA for smoother edges
   pipeline.fxaaEnabled = true;
   pipeline.bloomEnabled = true;
-  pipeline.bloomWeight = 0.15;
-  pipeline.bloomThreshold = 0.8;
-  pipeline.bloomKernel = 64;
+  pipeline.bloomWeight = 0.2;
+  pipeline.bloomThreshold = 0.7;
+  pipeline.bloomKernel = 96;
+  pipeline.bloomScale = 0.6;
   pipeline.chromaticAberrationEnabled = true;
-  pipeline.chromaticAberration.aberrationAmount = 15;
-  pipeline.chromaticAberration.radialIntensity = 0.8;
+  pipeline.chromaticAberration.aberrationAmount = 12;
+  pipeline.chromaticAberration.radialIntensity = 0.6;
   pipeline.grainEnabled = true;
-  pipeline.grain.intensity = 8;
+  pipeline.grain.intensity = 5;
   pipeline.grain.animated = true;
   pipeline.sharpenEnabled = true;
-  pipeline.sharpen.edgeAmount = 0.25;
-  pipeline.sharpen.colorAmount = 0.8;
+  pipeline.sharpen.edgeAmount = 0.35;
+  pipeline.sharpen.colorAmount = 0.9;
   pipeline.depthOfFieldEnabled = false;
   pipeline.imageProcessingEnabled = true;
 
@@ -129,6 +140,9 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
 
   // Create realistic car mesh
   const carMesh = createCarMesh(scene, shadowGen);
+
+  // Create 3D grass field with wind animation
+  createGrassField(scene, shadowGen);
 
   // Create water puddles on track
   createWater(scene, track);

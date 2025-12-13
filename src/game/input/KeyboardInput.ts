@@ -14,6 +14,7 @@ export function attachKeyboard(input: InputState, canvas: HTMLCanvasElement) {
     if (isTypingTarget(e.target)) return;
     down.add(e.code);
     if (e.code === "KeyR") input.resetPressed = true;
+    if (e.code === "KeyC") input.cameraNextPressed = true;
 
     // Prevent default for game controls to avoid page scrolling
     if (e.code.startsWith("Arrow") || e.code === "Space") {

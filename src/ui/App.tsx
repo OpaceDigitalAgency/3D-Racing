@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { GameAPI } from "../game/Game";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
-import type { TelemetrySnapshot } from "../shared/telemetry";
+import { CAMERA_VIEWS, type CameraViewId, type TelemetrySnapshot } from "../shared/telemetry";
 
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
@@ -12,6 +12,7 @@ function fmtTime(s: number) {
 export function App({ game }: { game: GameAPI }) {
   const [t, setT] = useState<TelemetrySnapshot>(() => game.getTelemetry());
   const [quality, setQuality] = useState<QualityPresetId>(t.quality);
+  const [cameraView, setCameraView] = useState<CameraViewId>(t.cameraView);
 
   const presets = useMemo(() => QUALITY_PRESETS, []);
 
@@ -23,6 +24,10 @@ export function App({ game }: { game: GameAPI }) {
   useEffect(() => {
     game.setQuality(quality);
   }, [game, quality]);
+
+  useEffect(() => {
+    game.setCameraView(cameraView);
+  }, [game, cameraView]);
 
   return (
     <div className="ui">
@@ -92,12 +97,22 @@ export function App({ game }: { game: GameAPI }) {
             ))}
           </select>
         </label>
+        <label>
+          Camera
+          <select value={cameraView} onChange={(e) => setCameraView(e.target.value as CameraViewId)}>
+            {CAMERA_VIEWS.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button onClick={() => game.reset()}>Reset (R)</button>
       </div>
 
       <div className="hint">
         <div>
-          Drive: <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd>, Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset
+          Drive: <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd>, Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset, <kbd>C</kbd> camera
         </div>
         <div style={{ marginTop: 6 }}>Tip: WebGPU + High/Ultra looks best; Medium/Low improves laptops.</div>
       </div>

@@ -2,8 +2,10 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
+import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Quaternion } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
@@ -68,117 +70,152 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   headlightMat.metallic = 0.0;
   headlightMat.roughness = 0.2;
 
-  // Main body - lower section
-  const bodyLower = CreateBox("bodyLower", { width: 1.85, height: 0.35, depth: 4.4 }, scene);
-  bodyLower.position.y = 0.25;
-  bodyLower.material = paintMat;
-  bodyLower.parent = carRoot;
+  // Futuristic rounded body using capsule/sphere shapes
+  // Main body - sleek elongated capsule base
+  const bodyMain = CreateCapsule("bodyMain", { height: 4.0, radius: 0.55 }, scene);
+  bodyMain.rotation.x = Math.PI / 2;
+  bodyMain.scaling = new Vector3(1.7, 1.0, 0.65);
+  bodyMain.position.y = 0.38;
+  bodyMain.material = paintMat;
+  bodyMain.parent = carRoot;
 
-  // Main body - upper cabin
-  const cabin = CreateBox("cabin", { width: 1.7, height: 0.45, depth: 2.0 }, scene);
-  cabin.position = new Vector3(0, 0.65, -0.3);
-  cabin.material = paintMat;
-  cabin.parent = carRoot;
+  // Cabin dome - smooth curved top
+  const cabinDome = CreateSphere("cabinDome", { diameter: 2.2, segments: 24 }, scene);
+  cabinDome.scaling = new Vector3(0.75, 0.35, 0.55);
+  cabinDome.position = new Vector3(0, 0.68, -0.2);
+  cabinDome.material = paintMat;
+  cabinDome.parent = carRoot;
 
-  // Front hood (sloped)
-  const hood = CreateBox("hood", { width: 1.75, height: 0.2, depth: 1.2 }, scene);
-  hood.position = new Vector3(0, 0.5, 1.4);
-  hood.rotation.x = -0.15;
-  hood.material = paintMat;
-  hood.parent = carRoot;
+  // Front nose - aerodynamic pointed front
+  const frontNose = CreateSphere("frontNose", { diameter: 1.4, segments: 16 }, scene);
+  frontNose.scaling = new Vector3(1.2, 0.4, 1.5);
+  frontNose.position = new Vector3(0, 0.32, 1.8);
+  frontNose.material = paintMat;
+  frontNose.parent = carRoot;
 
-  // Rear trunk
-  const trunk = CreateBox("trunk", { width: 1.75, height: 0.25, depth: 0.9 }, scene);
-  trunk.position = new Vector3(0, 0.52, -1.6);
-  trunk.rotation.x = 0.12;
-  trunk.material = paintMat;
-  trunk.parent = carRoot;
+  // Rear diffuser/spoiler area
+  const rearSection = CreateSphere("rearSection", { diameter: 1.6, segments: 16 }, scene);
+  rearSection.scaling = new Vector3(1.1, 0.45, 0.8);
+  rearSection.position = new Vector3(0, 0.35, -1.7);
+  rearSection.material = paintMat;
+  rearSection.parent = carRoot;
 
-  // Windscreen
-  const windscreen = CreateBox("windscreen", { width: 1.5, height: 0.02, depth: 1.0 }, scene);
-  windscreen.position = new Vector3(0, 0.75, 0.55);
-  windscreen.rotation.x = -0.6;
+  // Side air intakes (left)
+  const intakeL = CreateCapsule("intakeL", { height: 0.8, radius: 0.12 }, scene);
+  intakeL.rotation.x = Math.PI / 2;
+  intakeL.position = new Vector3(-0.9, 0.35, 0.3);
+  intakeL.material = chromeMat;
+  intakeL.parent = carRoot;
+
+  // Side air intakes (right)
+  const intakeR = intakeL.clone("intakeR");
+  intakeR.position.x = 0.9;
+  intakeR.parent = carRoot;
+
+  // Cockpit canopy - curved glass
+  const canopy = CreateSphere("canopy", { diameter: 1.8, segments: 24 }, scene);
+  canopy.scaling = new Vector3(0.72, 0.25, 0.52);
+  canopy.position = new Vector3(0, 0.82, -0.15);
+  canopy.material = glassMat;
+  canopy.parent = carRoot;
+
+  // Front windscreen strip
+  const windscreen = CreateSphere("windscreen", { diameter: 1.2, segments: 16 }, scene);
+  windscreen.scaling = new Vector3(1.15, 0.08, 0.6);
+  windscreen.position = new Vector3(0, 0.72, 0.6);
   windscreen.material = glassMat;
   windscreen.parent = carRoot;
 
-  // Rear window
-  const rearWindow = CreateBox("rearWindow", { width: 1.4, height: 0.02, depth: 0.8 }, scene);
-  rearWindow.position = new Vector3(0, 0.72, -1.1);
-  rearWindow.rotation.x = 0.55;
-  rearWindow.material = glassMat;
-  rearWindow.parent = carRoot;
+  // Rear spoiler
+  const spoiler = CreateBox("spoiler", { width: 1.6, height: 0.04, depth: 0.25 }, scene);
+  spoiler.position = new Vector3(0, 0.72, -2.0);
+  spoiler.material = chromeMat;
+  spoiler.parent = carRoot;
 
-  // Side windows
-  const sideWindowL = CreateBox("sideWindowL", { width: 0.02, height: 0.35, depth: 1.2 }, scene);
-  sideWindowL.position = new Vector3(-0.85, 0.68, -0.25);
-  sideWindowL.material = glassMat;
-  sideWindowL.parent = carRoot;
+  // Spoiler supports
+  const spoilerSupportL = CreateCylinder("spoilerSupportL", { height: 0.15, diameter: 0.06 }, scene);
+  spoilerSupportL.position = new Vector3(-0.6, 0.62, -2.0);
+  spoilerSupportL.material = chromeMat;
+  spoilerSupportL.parent = carRoot;
 
-  const sideWindowR = sideWindowL.clone("sideWindowR");
-  sideWindowR.position.x = 0.85;
-  sideWindowR.parent = carRoot;
+  const spoilerSupportR = spoilerSupportL.clone("spoilerSupportR");
+  spoilerSupportR.position.x = 0.6;
+  spoilerSupportR.parent = carRoot;
 
-  // Wheels
+  // Futuristic wheels with glowing rims
   const createWheel = (name: string, x: number, z: number) => {
     const wheelGroup = new TransformNode(name, scene);
     wheelGroup.parent = carRoot;
-    wheelGroup.position = new Vector3(x, 0.32, z);
+    wheelGroup.position = new Vector3(x, 0.28, z);
 
-    // Tyre
-    const tyre = CreateCylinder(`${name}_tyre`, { height: 0.28, diameter: 0.68 }, scene);
+    // Tyre - wider, lower profile racing tyre
+    const tyre = CreateCylinder(`${name}_tyre`, { height: 0.32, diameter: 0.58, tessellation: 32 }, scene);
     tyre.rotation.z = Math.PI / 2;
     tyre.material = rubberMat;
     tyre.parent = wheelGroup;
 
-    // Rim
-    const rim = CreateCylinder(`${name}_rim`, { height: 0.22, diameter: 0.45 }, scene);
+    // Multi-spoke futuristic rim
+    const rim = CreateCylinder(`${name}_rim`, { height: 0.28, diameter: 0.42, tessellation: 24 }, scene);
     rim.rotation.z = Math.PI / 2;
     rim.material = rimMat;
     rim.parent = wheelGroup;
 
+    // Glowing rim accent
+    const rimGlow = MeshBuilder.CreateTorus(`${name}_glow`, { diameter: 0.45, thickness: 0.02, tessellation: 32 }, scene);
+    rimGlow.rotation.z = Math.PI / 2;
+    const glowMat = new PBRMaterial(`${name}_glowMat`, scene);
+    glowMat.albedoColor = new Color3(0.0, 0.8, 1.0);
+    glowMat.emissiveColor = new Color3(0.0, 0.5, 0.8);
+    glowMat.metallic = 0.5;
+    glowMat.roughness = 0.3;
+    rimGlow.material = glowMat;
+    rimGlow.parent = wheelGroup;
+
     return wheelGroup;
   };
 
-  createWheel("wheelFL", -0.82, 1.35);
-  createWheel("wheelFR", 0.82, 1.35);
-  createWheel("wheelRL", -0.82, -1.25);
-  createWheel("wheelRR", 0.82, -1.25);
+  createWheel("wheelFL", -0.85, 1.35);
+  createWheel("wheelFR", 0.85, 1.35);
+  createWheel("wheelRL", -0.85, -1.30);
+  createWheel("wheelRR", 0.85, -1.30);
 
-  // Headlights
-  const headlightL = CreateBox("headlightL", { width: 0.35, height: 0.12, depth: 0.05 }, scene);
-  headlightL.position = new Vector3(-0.55, 0.38, 2.18);
+  // LED headlight strips (futuristic)
+  const headlightStrip = MeshBuilder.CreateTorus("headlightStrip", { diameter: 0.8, thickness: 0.04, tessellation: 32, arc: 0.5 }, scene);
+  headlightStrip.rotation.y = Math.PI;
+  headlightStrip.rotation.x = Math.PI / 2;
+  headlightStrip.position = new Vector3(0, 0.35, 2.3);
+  headlightStrip.material = headlightMat;
+  headlightStrip.parent = carRoot;
+
+  // Side headlight accents
+  const headlightL = CreateSphere("headlightL", { diameter: 0.2, segments: 16 }, scene);
+  headlightL.scaling = new Vector3(1.0, 0.6, 0.3);
+  headlightL.position = new Vector3(-0.65, 0.32, 2.35);
   headlightL.material = headlightMat;
   headlightL.parent = carRoot;
 
   const headlightR = headlightL.clone("headlightR");
-  headlightR.position.x = 0.55;
+  headlightR.position.x = 0.65;
   headlightR.parent = carRoot;
 
-  // Tail lights
-  const taillightL = CreateBox("taillightL", { width: 0.4, height: 0.1, depth: 0.05 }, scene);
-  taillightL.position = new Vector3(-0.6, 0.4, -2.18);
-  taillightL.material = lightMat;
-  taillightL.parent = carRoot;
+  // LED tail light strip
+  const taillightStrip = MeshBuilder.CreateTorus("taillightStrip", { diameter: 1.2, thickness: 0.05, tessellation: 32, arc: 0.4 }, scene);
+  taillightStrip.rotation.x = Math.PI / 2;
+  taillightStrip.position = new Vector3(0, 0.45, -2.15);
+  taillightStrip.material = lightMat;
+  taillightStrip.parent = carRoot;
 
-  const taillightR = taillightL.clone("taillightR");
-  taillightR.position.x = 0.6;
-  taillightR.parent = carRoot;
-
-  // Front grille
-  const grille = CreateBox("grille", { width: 1.2, height: 0.2, depth: 0.05 }, scene);
-  grille.position = new Vector3(0, 0.22, 2.2);
-  grille.material = chromeMat;
-  grille.parent = carRoot;
-
-  // Side mirrors
-  const mirrorL = CreateBox("mirrorL", { width: 0.12, height: 0.08, depth: 0.15 }, scene);
-  mirrorL.position = new Vector3(-1.0, 0.58, 0.6);
-  mirrorL.material = paintMat;
-  mirrorL.parent = carRoot;
-
-  const mirrorR = mirrorL.clone("mirrorR");
-  mirrorR.position.x = 1.0;
-  mirrorR.parent = carRoot;
+  // Undercar LED glow
+  const underGlow = MeshBuilder.CreatePlane("underGlow", { width: 1.6, height: 3.5 }, scene);
+  underGlow.rotation.x = Math.PI / 2;
+  underGlow.position = new Vector3(0, 0.05, 0);
+  const underGlowMat = new PBRMaterial("underGlowMat", scene);
+  underGlowMat.albedoColor = new Color3(0.0, 0.6, 1.0);
+  underGlowMat.emissiveColor = new Color3(0.0, 0.3, 0.6);
+  underGlowMat.alpha = 0.4;
+  underGlowMat.transparencyMode = PBRMaterial.MATERIAL_ALPHABLEND;
+  underGlow.material = underGlowMat;
+  underGlow.parent = carRoot;
 
   // Merge all meshes into one for performance
   const allMeshes: Mesh[] = [];

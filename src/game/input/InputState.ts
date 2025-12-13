@@ -4,5 +4,6 @@ export class InputState {
   handbrake = 0;
   steer = 0;
   resetPressed = false;
+  cameraNextPressed = false;
 }
 

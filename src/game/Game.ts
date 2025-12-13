@@ -9,7 +9,7 @@ import { attachKeyboard } from "./input/KeyboardInput";
 import { attachGamepad } from "./input/GamepadInput";
 import { CarSim } from "./sim/CarSim";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
-import type { TelemetrySnapshot } from "../shared/telemetry";
+import { CAMERA_VIEWS, type TelemetrySnapshot, type CameraViewId } from "../shared/telemetry";
 import type { ProjectionRef } from "./track/Track";
 
 type CreateGameArgs = { canvas: HTMLCanvasElement };
@@ -18,6 +18,7 @@ export type GameAPI = {
   start(): void;
   resize(): void;
   setQuality(id: QualityPresetId): void;
+  setCameraView(id: CameraViewId): void;
   reset(): void;
   getTelemetry(): TelemetrySnapshot;
 };
@@ -39,8 +40,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     rolling: 0.45,
     lateralGrip: 19.0,
     handbrakeGripScale: 0.35,
-    offroadGripScale: 0.55,
-    offroadDragScale: 1.9,
+    offroadGripScale: 0.7,      // Increased from 0.55 - can still drive on grass
+    offroadDragScale: 1.4,      // Reduced from 1.9 - less resistance on grass
     maxSpeed: 88
   });
 
@@ -62,6 +63,18 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   };
 
   applyQuality(quality);
+
+  // Camera view system
+  let cameraView: CameraViewId = "chase";
+  const setCameraView = (id: CameraViewId) => {
+    cameraView = id;
+    // Reset camera controls for orbit mode
+    if (id === "orbit") {
+      camera.attachControl(canvas, true);
+    } else {
+      camera.detachControl();
+    }
+  };
 
   // Set initial car position on track
   const startPos = track.centerline[0];
@@ -112,15 +125,17 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       surface
     );
 
-    // Soft constraint: keep car near track; push back if far outside.
+    // Soft constraint: allow driving on grass but push back if way too far outside
     const p = projection;
     const overflow = p.distance - track.halfWidth;
-    if (overflow > 0) {
-      p.normal.scaleToRef(-overflow * 0.65, tmpVec);
+    const softMargin = 25; // Allow up to 25m off track before pushing back
+    if (overflow > softMargin) {
+      const pushStrength = Math.min(0.3, (overflow - softMargin) * 0.02);
+      p.normal.scaleToRef(-pushStrength, tmpVec);
       sim.position.addInPlace(tmpVec);
       const vn = Vector3.Dot(sim.velocity, p.normal);
       if (vn > 0) {
-        p.normal.scaleToRef(-vn * 1.2, tmpVec);
+        p.normal.scaleToRef(-vn * 0.3, tmpVec);
         sim.velocity.addInPlace(tmpVec);
       }
     }
@@ -161,23 +176,88 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       sim.yawRad = yaw;
     }
 
+    // Cycle camera view with C key
+    if (input.cameraNextPressed) {
+      input.cameraNextPressed = false;
+      const currentIdx = CAMERA_VIEWS.findIndex(v => v.id === cameraView);
+      const nextIdx = (currentIdx + 1) % CAMERA_VIEWS.length;
+      setCameraView(CAMERA_VIEWS[nextIdx].id);
+    }
+
     // Apply to visuals
     carMesh.position.copyFrom(sim.position);
     Quaternion.FromEulerAnglesToRef(0, sim.yawRad, 0, carRot);
     carMesh.rotationQuaternion?.copyFrom(carRot);
 
-    // Camera chase - follows car but allows user zoom/angle adjustment
+    // Camera positioning based on view mode
     const forward = sim.forwardVec;
-    const target = sim.position.add(forward.scale(4)).add(new Vector3(0, 0.8, 0));
-    camera.target = Vector3.Lerp(camera.target, target, 1 - Math.pow(0.0005, dt));
+    const right = sim.rightVec;
+    const lerpFactor = 1 - Math.pow(0.0005, dt);
 
-    // Only auto-rotate alpha (horizontal) to follow car direction
-    // User can still adjust beta (vertical angle) and radius (zoom) with mouse
-    const targetAlpha = Math.PI + sim.yawRad;
-    const alphaDiff = targetAlpha - camera.alpha;
-    // Normalise angle difference to -PI..PI
-    const normDiff = Math.atan2(Math.sin(alphaDiff), Math.cos(alphaDiff));
-    camera.alpha += normDiff * Math.min(1, 6 * dt);
+    switch (cameraView) {
+      case "chase": {
+        // Chase camera - behind and above the car
+        const target = sim.position.add(forward.scale(4)).add(new Vector3(0, 0.8, 0));
+        camera.target = Vector3.Lerp(camera.target, target, lerpFactor);
+        const targetAlpha = Math.PI + sim.yawRad;
+        const alphaDiff = targetAlpha - camera.alpha;
+        const normDiff = Math.atan2(Math.sin(alphaDiff), Math.cos(alphaDiff));
+        camera.alpha += normDiff * Math.min(1, 6 * dt);
+        camera.beta = 1.15;
+        camera.radius = 14;
+        carMesh.isVisible = true;
+        break;
+      }
+      case "driver": {
+        // First person from driver seat
+        const driverPos = sim.position.add(forward.scale(0.3)).add(new Vector3(0, 1.4, 0)).add(right.scale(-0.35));
+        camera.target = driverPos.add(forward.scale(50));
+        camera.position = Vector3.Lerp(camera.position, driverPos, lerpFactor * 2);
+        camera.alpha = Math.PI + sim.yawRad;
+        camera.beta = Math.PI / 2;
+        camera.radius = 0.01;
+        carMesh.isVisible = false;
+        break;
+      }
+      case "hood": {
+        // Hood camera - front of car looking forward
+        const hoodPos = sim.position.add(forward.scale(2.0)).add(new Vector3(0, 1.2, 0));
+        camera.target = hoodPos.add(forward.scale(50));
+        camera.position = Vector3.Lerp(camera.position, hoodPos, lerpFactor * 2);
+        camera.alpha = Math.PI + sim.yawRad;
+        camera.beta = Math.PI / 2;
+        camera.radius = 0.01;
+        carMesh.isVisible = true;
+        break;
+      }
+      case "bumper": {
+        // Bumper camera - very low at front of car
+        const bumperPos = sim.position.add(forward.scale(2.3)).add(new Vector3(0, 0.4, 0));
+        camera.target = bumperPos.add(forward.scale(50));
+        camera.position = Vector3.Lerp(camera.position, bumperPos, lerpFactor * 2);
+        camera.alpha = Math.PI + sim.yawRad;
+        camera.beta = Math.PI / 2;
+        camera.radius = 0.01;
+        carMesh.isVisible = false;
+        break;
+      }
+      case "orbit": {
+        // Free orbit camera - user controlled with mouse
+        camera.target = Vector3.Lerp(camera.target, sim.position.add(new Vector3(0, 1, 0)), lerpFactor * 0.5);
+        carMesh.isVisible = true;
+        break;
+      }
+      case "top": {
+        // Top down view
+        const topTarget = sim.position.add(new Vector3(0, 0.5, 0));
+        camera.target = Vector3.Lerp(camera.target, topTarget, lerpFactor);
+        camera.alpha = Math.PI + sim.yawRad;
+        camera.beta = 0.05;
+        camera.radius = 35;
+        carMesh.isVisible = true;
+        break;
+      }
+    }
   };
 
   const onFrame = () => {
@@ -210,6 +290,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     laps,
     quality,
     renderer,
+    cameraView,
     input: { throttle: input.throttle, brake: input.brake, steer: input.steer, handbrake: input.handbrake },
     focus: {
       hasDocumentFocus: document.hasFocus(),
@@ -229,5 +310,5 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   void scene;
   (window as any).__apexGame = { engine, scene, sim, track };
 
-  return { start, resize, setQuality, reset, getTelemetry };
+  return { start, resize, setQuality, setCameraView, reset, getTelemetry };
 }
