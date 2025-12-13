@@ -1,5 +1,4 @@
-import { Quaternion } from "@babylonjs/core/Maths/math.vector";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import { createEngine } from "./createEngine";
 import { createScene } from "./createScene";
@@ -13,6 +12,7 @@ import { CAMERA_VIEWS, type TelemetrySnapshot, type CameraViewId } from "../shar
 import type { ProjectionRef } from "./track/Track";
 import { DamageSystem, createCrashParticles, triggerCrashEffect, applyVisualDamage, createSmokeParticles } from "./effects/CrashEffects";
 import { ExhaustFireSystem } from "./effects/ExhaustFire";
+import { isInWater, createWaterSplash, triggerSplash, stopSplash } from "./Water";
 
 type CreateGameArgs = { canvas: HTMLCanvasElement };
 
@@ -27,7 +27,7 @@ export type GameAPI = {
 
 export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const { engine, renderer } = await createEngine(canvas);
-  const { scene, camera, shadowGen, pipeline, carMesh, track, ramps } = await createScene(engine, canvas);
+  const { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps } = await createScene(engine, canvas);
 
   const input = new InputState();
   const detachKeyboard = attachKeyboard(input, canvas);
@@ -54,11 +54,15 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const crashParticles = createCrashParticles(scene);
   const smokeParticles = createSmokeParticles(scene);
   const exhaustFire = new ExhaustFireSystem(scene, carMesh);
+  const waterSplash = createWaterSplash(scene);
 
   // Collision cooldown to prevent rapid damage
   let collisionCooldown = 0;
+  let wasInWater = false;
 
   let quality: QualityPresetId = "high";
+  let ssaoAttached = false;
+  let motionBlurAttached = false;
   const applyQuality = (id: QualityPresetId) => {
     const preset = QUALITY_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[2];
     quality = preset.id;
@@ -69,8 +73,56 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     shadowGen.blurKernel = preset.shadows.blurKernel;
     shadowGen.setDarkness(preset.shadows.enabled ? 0.42 : 0.0);
 
-    pipeline.fxaaEnabled = preset.post.fxaa;
+    if (taa) taa.isEnabled = preset.post.taa;
+    pipeline.fxaaEnabled = preset.post.fxaa && !preset.post.taa;
     pipeline.bloomEnabled = preset.post.bloom;
+
+    pipeline.chromaticAberrationEnabled = preset.id === "high" || preset.id === "ultra";
+    pipeline.grainEnabled = preset.id !== "low";
+
+    if (ssr) ssr.isEnabled = preset.post.ssr;
+    if (motionBlur) {
+      const want = preset.post.motionBlur;
+      try {
+        if (want && !motionBlurAttached) {
+          camera.attachPostProcess(motionBlur);
+          motionBlurAttached = true;
+        } else if (!want && motionBlurAttached) {
+          camera.detachPostProcess(motionBlur);
+          motionBlurAttached = false;
+        }
+      } catch (e) {
+        console.warn("Motion blur toggle failed; disabling motion blur.", e);
+        try {
+          camera.detachPostProcess(motionBlur);
+        } catch {
+          // ignore
+        }
+        motionBlurAttached = false;
+      }
+    }
+
+    if (ssao2) {
+      const mgr = scene.postProcessRenderPipelineManager;
+      const want = preset.post.ssao;
+      try {
+        if (want && !ssaoAttached) {
+          mgr.attachCamerasToRenderPipeline("ssao2", camera);
+          ssaoAttached = true;
+        } else if (!want && ssaoAttached) {
+          mgr.detachCamerasFromRenderPipeline("ssao2", camera);
+          ssaoAttached = false;
+        }
+      } catch (e) {
+        console.warn("SSAO pipeline toggle failed; disabling SSAO.", e);
+        try {
+          mgr.detachCamerasFromRenderPipeline("ssao2", camera);
+        } catch {
+          // ignore
+        }
+        ssaoAttached = false;
+      }
+    }
   };
 
   applyQuality(quality);
@@ -122,50 +174,59 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const projRef: ProjectionRef = { closest: new Vector3(), normal: new Vector3(), distance: 0, s: 0 };
   const tmpVec = new Vector3();
   const carRot = new Quaternion();
+  const carParts = carMesh.getChildMeshes();
+  const setCarVisible = (visible: boolean) => {
+    const v = visible ? 1 : 0;
+    carParts.forEach((m) => {
+      m.visibility = v;
+    });
+  };
+  setCameraView(cameraView);
 
   const tickSim = (dt: number) => {
-    const { projection, onTrack } = track.surfaceAtToRef(sim.position, projRef);
+    try {
+      const { projection, onTrack } = track.surfaceAtToRef(sim.position, projRef);
 
-    const surface = onTrack
-      ? { grip: 1.0, dragScale: 1.0 }
-      : { grip: sim.params.offroadGripScale, dragScale: sim.params.offroadDragScale };
+      const surface = onTrack
+        ? { grip: 1.0, dragScale: 1.0 }
+        : { grip: sim.params.offroadGripScale, dragScale: sim.params.offroadDragScale };
 
-    // Get ramp height at current position
-    const rampInfo = ramps.getHeightAt(sim.position, sim.yawRad);
+      // Get ramp height at current position
+      const rampInfo = ramps.getHeightAt(sim.position, sim.yawRad);
 
-    // Handle side collision with ramp barriers
-    if (rampInfo.sideCollision) {
-      const impactSpeed = sim.speedMps * 3.6;
-      const damageAmount = Math.max(0, (impactSpeed - 15) * 0.4);
+      // Handle side collision with ramp barriers
+      if (rampInfo.sideCollision) {
+        const impactSpeed = sim.speedMps * 3.6;
+        const damageAmount = Math.max(0, (impactSpeed - 15) * 0.4);
 
-      if (damageAmount > 0) {
-        damageSystem.addDamage(damageAmount);
-        triggerCrashEffect(crashParticles, sim.position, impactSpeed / 15);
-        applyVisualDamage(carMesh, damageSystem.damagePercent);
+        if (damageAmount > 0) {
+          damageSystem.addDamage(damageAmount);
+          triggerCrashEffect(crashParticles, sim.position, impactSpeed / 15);
+          applyVisualDamage(carMesh, damageSystem.damagePercent);
+        }
+
+        // Bounce off the side
+        const bounceNormal = rampInfo.normal;
+        const vn = Vector3.Dot(sim.velocity, bounceNormal);
+        if (vn < 0) {
+          sim.velocity.addInPlace(bounceNormal.scale(-vn * 1.5));
+          sim.velocity.scaleInPlace(0.6);
+        }
       }
 
-      // Bounce off the side
-      const bounceNormal = rampInfo.normal;
-      const vn = Vector3.Dot(sim.velocity, bounceNormal);
-      if (vn < 0) {
-        sim.velocity.addInPlace(bounceNormal.scale(-vn * 1.5));
-        sim.velocity.scaleInPlace(0.6);
-      }
-    }
+      // Pass ground info to physics
+      const groundInfo = {
+        height: rampInfo.height,
+        normal: rampInfo.normal,
+        onRamp: rampInfo.onRamp
+      };
 
-    // Pass ground info to physics
-    const groundInfo = {
-      height: rampInfo.height,
-      normal: rampInfo.normal,
-      onRamp: rampInfo.onRamp
-    };
-
-    sim.update(
-      dt,
-      { throttle: input.throttle, brake: input.brake, handbrake: input.handbrake, steer: input.steer },
-      surface,
-      groundInfo
-    );
+      sim.update(
+        dt,
+        { throttle: input.throttle, brake: input.brake, handbrake: input.handbrake, steer: input.steer },
+        surface,
+        groundInfo
+      );
 
     // Soft constraint: allow driving on grass but push back if way too far outside
     const p = projection;
@@ -239,6 +300,19 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       sim.speedMps
     );
 
+    // Water splash effects
+    const inWater = isInWater(sim.position);
+    if (inWater && sim.speedMps > 2) {
+      // Trigger splash when in water and moving
+      const splashPos = sim.position.add(new Vector3(0, 0.15, 0));
+      triggerSplash(waterSplash, splashPos, sim.velocity, sim.speedMps);
+      wasInWater = true;
+    } else if (wasInWater) {
+      // Stop splash when leaving water
+      stopSplash(waterSplash);
+      wasInWater = false;
+    }
+
     // Lap: wrap around track s coordinate while moving forward
     const s = projection.s;
     const wrappedForward = lastS > track.totalLength * 0.65 && s < track.totalLength * 0.35;
@@ -288,16 +362,45 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       setCameraView(CAMERA_VIEWS[nextIdx].id);
     }
 
-    // Apply to visuals
-    carMesh.position.copyFrom(sim.position);
-    // Apply both yaw and pitch rotation for ramps/jumps
-    Quaternion.FromEulerAnglesToRef(sim.pitchRad, sim.yawRad, 0, carRot);
+      // Apply to visuals
+      carMesh.position.copyFrom(sim.position);
+      // Apply both yaw and pitch rotation for ramps/jumps
+      Quaternion.FromEulerAnglesToRef(sim.pitchRad, sim.yawRad, 0, carRot);
     carMesh.rotationQuaternion?.copyFrom(carRot);
 
     // Camera positioning based on view mode
     const forward = sim.forwardVec;
     const right = sim.rightVec;
     const lerpFactor = 1 - Math.pow(0.0005, dt);
+
+    // Helper to compute ArcRotateCamera params from desired position and target
+    const setArcCameraFromPositionTarget = (
+      camPos: Vector3,
+      lookAt: Vector3,
+      fov: number,
+      smooth: boolean = true
+    ) => {
+      const dir = lookAt.subtract(camPos);
+      const targetRadius = dir.length();
+      const targetAlpha = Math.atan2(dir.x, dir.z);
+      const targetBeta = Math.acos(dir.y / targetRadius);
+
+      if (smooth) {
+        const alphaLerp = 1 - Math.pow(0.00001, dt);
+        const alphaDiff = targetAlpha - camera.alpha;
+        const normDiff = Math.atan2(Math.sin(alphaDiff), Math.cos(alphaDiff));
+        camera.alpha += normDiff * alphaLerp;
+        camera.beta += (targetBeta - camera.beta) * alphaLerp;
+        camera.radius += (targetRadius - camera.radius) * alphaLerp;
+        camera.target = Vector3.Lerp(camera.target, lookAt, alphaLerp);
+      } else {
+        camera.alpha = targetAlpha;
+        camera.beta = targetBeta;
+        camera.radius = targetRadius;
+        camera.target.copyFrom(lookAt);
+      }
+      camera.fov = fov;
+    };
 
     switch (cameraView) {
       case "chase": {
@@ -310,40 +413,40 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         camera.alpha += normDiff * Math.min(1, 6 * dt);
         camera.beta = 1.15;
         camera.radius = 14;
-        carMesh.isVisible = true;
+        camera.fov = 0.9;
+        setCarVisible(true);
         break;
       }
       case "driver": {
         // First person from driver seat - position camera inside car cockpit
-        const driverPos = sim.position.add(forward.scale(-0.5)).add(new Vector3(0, 1.1, 0)).add(right.scale(-0.3));
-        const lookTarget = driverPos.add(forward.scale(100));
-        camera.position.copyFrom(driverPos);
-        camera.setTarget(lookTarget);
-        carMesh.isVisible = false;
+        // Camera is at driver position, looking far ahead along forward vector
+        const driverPos = sim.position.add(forward.scale(-0.3)).add(new Vector3(0, 1.0, 0)).add(right.scale(-0.25));
+        const lookTarget = driverPos.add(forward.scale(50));
+        setArcCameraFromPositionTarget(driverPos, lookTarget, 0.85);
+        setCarVisible(false);
         break;
       }
       case "hood": {
         // Hood camera - on the bonnet looking forward
-        const hoodPos = sim.position.add(forward.scale(1.8)).add(new Vector3(0, 0.9, 0));
-        const hoodTarget = hoodPos.add(forward.scale(100));
-        camera.position.copyFrom(hoodPos);
-        camera.setTarget(hoodTarget);
-        carMesh.isVisible = true;
+        const hoodPos = sim.position.add(forward.scale(1.6)).add(new Vector3(0, 0.85, 0));
+        const hoodTarget = hoodPos.add(forward.scale(50));
+        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.92);
+        setCarVisible(true);
         break;
       }
       case "bumper": {
         // Bumper camera - very low at front of car
-        const bumperPos = sim.position.add(forward.scale(2.2)).add(new Vector3(0, 0.35, 0));
-        const bumperTarget = bumperPos.add(forward.scale(100));
-        camera.position.copyFrom(bumperPos);
-        camera.setTarget(bumperTarget);
-        carMesh.isVisible = false;
+        const bumperPos = sim.position.add(forward.scale(2.0)).add(new Vector3(0, 0.3, 0));
+        const bumperTarget = bumperPos.add(forward.scale(50));
+        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.95);
+        setCarVisible(false);
         break;
       }
       case "orbit": {
         // Free orbit camera - user controlled with mouse
         camera.target = Vector3.Lerp(camera.target, sim.position.add(new Vector3(0, 1, 0)), lerpFactor * 0.5);
-        carMesh.isVisible = true;
+        camera.fov = 0.9;
+        setCarVisible(true);
         break;
       }
       case "top": {
@@ -353,9 +456,19 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         camera.alpha = Math.PI + sim.yawRad;
         camera.beta = 0.05;
         camera.radius = 35;
-        carMesh.isVisible = true;
+        camera.fov = 0.8;
+        setCarVisible(true);
         break;
       }
+    }
+
+    // Motion blur strength from speed (when enabled).
+    if (motionBlur && motionBlurAttached) {
+      const speed01 = Math.max(0, Math.min(1, sim.speedMps / 55));
+      motionBlur.motionStrength = 0.15 + 0.75 * speed01;
+    }
+    } catch (e) {
+      console.error("tickSim error (continuing):", e);
     }
   };
 

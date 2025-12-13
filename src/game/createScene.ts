@@ -14,6 +14,10 @@ import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+import { SSAO2RenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssao2RenderingPipeline";
+import { SSRRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssrRenderingPipeline";
+import { TAARenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/taaRenderingPipeline";
+import { MotionBlurPostProcess } from "@babylonjs/core/PostProcesses/motionBlurPostProcess";
 import { Quaternion } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
@@ -22,6 +26,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 
 import "@babylonjs/core/Materials/Textures/Loaders/envTextureLoader";
+import "@babylonjs/core/PostProcesses/RenderPipeline/postProcessRenderPipelineManagerSceneComponent";
 
 import { Track } from "./track/Track";
 import { createCarMesh } from "./CarMesh";
@@ -35,6 +40,10 @@ export type SceneBits = {
   camera: ArcRotateCamera;
   shadowGen: ShadowGenerator;
   pipeline: DefaultRenderingPipeline;
+  taa: TAARenderingPipeline | null;
+  ssao2: SSAO2RenderingPipeline | null;
+  ssr: SSRRenderingPipeline | null;
+  motionBlur: MotionBlurPostProcess | null;
   carMesh: Mesh;
   track: Track;
   ramps: RampSystem;
@@ -117,6 +126,19 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   scene.imageProcessingConfiguration.vignetteColor = new Color4(0, 0, 0, 0);
   scene.imageProcessingConfiguration.vignetteCameraFov = 0.4;
 
+  // Optional pipelines (created early to preserve correct post-process ordering)
+  let taa: TAARenderingPipeline | null = null;
+  try {
+    taa = new TAARenderingPipeline("taa", scene, [camera]);
+    taa.samples = 8;
+    taa.factor = 0.08;
+    taa.disableOnCameraMove = true;
+    taa.isEnabled = false;
+  } catch (e) {
+    console.warn("TAA pipeline init failed; continuing without it.", e);
+    taa = null;
+  }
+
   // High quality post-processing pipeline
   const pipeline = new DefaultRenderingPipeline("pipe", true, scene, [camera]);
   pipeline.samples = 8; // Higher MSAA for smoother edges
@@ -127,16 +149,58 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   pipeline.bloomKernel = 96;
   pipeline.bloomScale = 0.6;
   pipeline.chromaticAberrationEnabled = true;
-  pipeline.chromaticAberration.aberrationAmount = 12;
+  pipeline.chromaticAberration.aberrationAmount = 3.5;
   pipeline.chromaticAberration.radialIntensity = 0.6;
   pipeline.grainEnabled = true;
-  pipeline.grain.intensity = 5;
+  pipeline.grain.intensity = 1.4;
   pipeline.grain.animated = true;
   pipeline.sharpenEnabled = true;
-  pipeline.sharpen.edgeAmount = 0.35;
-  pipeline.sharpen.colorAmount = 0.9;
+  pipeline.sharpen.edgeAmount = 0.18;
+  pipeline.sharpen.colorAmount = 0.65;
   pipeline.depthOfFieldEnabled = false;
   pipeline.imageProcessingEnabled = true;
+
+  let ssao2: SSAO2RenderingPipeline | null = null;
+  try {
+    ssao2 = new SSAO2RenderingPipeline("ssao2", scene, { ssaoRatio: 0.6, blurRatio: 1.0 }, [camera]);
+    ssao2.radius = 2.2;
+    ssao2.totalStrength = 0.9;
+    ssao2.samples = 8;
+    scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline("ssao2", camera);
+  } catch (e) {
+    console.warn("SSAO2 pipeline init failed; continuing without it.", e);
+    ssao2 = null;
+  }
+
+  let ssr: SSRRenderingPipeline | null = null;
+  try {
+    ssr = new SSRRenderingPipeline("ssr", scene, [camera], false);
+    ssr.strength = 0.8;
+    ssr.maxSteps = 80;
+    ssr.step = 1;
+    ssr.blurDispersionStrength = 0.0;
+    ssr.roughnessFactor = 0.15;
+    ssr.isEnabled = false;
+  } catch (e) {
+    console.warn("SSR pipeline init failed; continuing without it.", e);
+    ssr = null;
+  }
+
+  let motionBlur: MotionBlurPostProcess | null = null;
+  try {
+    motionBlur = new MotionBlurPostProcess("motionBlur", scene, 1.0, camera);
+    motionBlur.motionStrength = 0.0;
+    motionBlur.motionBlurSamples = 24;
+    motionBlur.isObjectBased = false;
+    try {
+      camera.detachPostProcess(motionBlur);
+    } catch {
+      // ignore
+    }
+  } catch (e) {
+    console.warn("Motion blur init failed; continuing without it.", e);
+    motionBlur = null;
+  }
 
   // Create track with improved materials
   const { track } = Track.createDefault(scene, shadowGen);
@@ -161,16 +225,16 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   // Add sponsor banners and props around the track
   const props = new TrackProps(scene, track, shadowGen);
 
-  // Add banners with company logos at various positions
-  props.addBanner(0.05, 'right', 'logos/transparent logo small.png', 4, 5);
-  props.addBanner(0.25, 'left', 'logos/New-Opace-Logo---High-Quality new.png', 3.5, 5);
-  props.addBanner(0.45, 'right', 'logos/website design agency logo.png', 4, 6);
-  props.addBanner(0.55, 'left', 'logos/transparent logo small.png', 4, 5);
-  props.addBanner(0.75, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 3.5, 5);
-  props.addBanner(0.95, 'left', 'logos/Logo - Vector.png', 4, 5);
+  // Add banners with company logos at various positions - larger and more visible
+  props.addBanner(0.05, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.25, 'left', 'logos/Logo - Vector.png', 7, 12);
+  props.addBanner(0.45, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.55, 'left', 'logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.75, 'right', 'logos/Logo - Vector.png', 7, 12);
+  props.addBanner(0.95, 'left', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
 
   // Add logo decal to car roof
-  props.addCarDecal(carMesh, 'logos/transparent logo small.png');
+  props.addCarDecal(carMesh, 'logos/New-Opace-Logo---High-Quality new.png');
 
-  return { scene, camera, shadowGen, pipeline, carMesh, track, ramps };
+  return { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps };
 }

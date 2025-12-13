@@ -12,9 +12,16 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 
+export type CarVisualRig = {
+  root: TransformNode;
+  wheels: { fl: TransformNode; fr: TransformNode; rl: TransformNode; rr: TransformNode };
+  wheelRadiusM: number;
+};
+
 export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   // Parent node for all car parts
   const carRoot = new TransformNode("carRoot", scene);
+  carRoot.rotationQuaternion = Quaternion.Identity();
   
   // Car body paint material - metallic racing blue
   const paintMat = new PBRMaterial("carPaint", scene);
@@ -145,6 +152,7 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   // Futuristic wheels with glowing rims
   const createWheel = (name: string, x: number, z: number) => {
     const wheelGroup = new TransformNode(name, scene);
+    wheelGroup.rotationQuaternion = Quaternion.Identity();
     wheelGroup.parent = carRoot;
     wheelGroup.position = new Vector3(x, 0.28, z);
 
@@ -174,13 +182,13 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
     return wheelGroup;
   };
 
-  createWheel("wheelFL", -0.85, 1.35);
-  createWheel("wheelFR", 0.85, 1.35);
-  createWheel("wheelRL", -0.85, -1.30);
-  createWheel("wheelRR", 0.85, -1.30);
+  const wheelFL = createWheel("wheelFL", -0.85, 1.35);
+  const wheelFR = createWheel("wheelFR", 0.85, 1.35);
+  const wheelRL = createWheel("wheelRL", -0.85, -1.30);
+  const wheelRR = createWheel("wheelRR", 0.85, -1.30);
 
   // LED headlight strips (futuristic)
-  const headlightStrip = MeshBuilder.CreateTorus("headlightStrip", { diameter: 0.8, thickness: 0.04, tessellation: 32, arc: 0.5 }, scene);
+  const headlightStrip = MeshBuilder.CreateTorus("headlightStrip", { diameter: 0.8, thickness: 0.04, tessellation: 32 }, scene);
   headlightStrip.rotation.y = Math.PI;
   headlightStrip.rotation.x = Math.PI / 2;
   headlightStrip.position = new Vector3(0, 0.35, 2.3);
@@ -199,7 +207,7 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   headlightR.parent = carRoot;
 
   // LED tail light strip
-  const taillightStrip = MeshBuilder.CreateTorus("taillightStrip", { diameter: 1.2, thickness: 0.05, tessellation: 32, arc: 0.4 }, scene);
+  const taillightStrip = MeshBuilder.CreateTorus("taillightStrip", { diameter: 1.2, thickness: 0.05, tessellation: 32 }, scene);
   taillightStrip.rotation.x = Math.PI / 2;
   taillightStrip.position = new Vector3(0, 0.45, -2.15);
   taillightStrip.material = lightMat;
@@ -233,6 +241,13 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   carRoot.parent = carMesh;
   carRoot.position = Vector3.Zero();
 
+  const rig: CarVisualRig = {
+    root: carRoot,
+    wheels: { fl: wheelFL, fr: wheelFR, rl: wheelRL, rr: wheelRR },
+    wheelRadiusM: 0.58 * 0.5
+  };
+  carMesh.metadata = { ...(carMesh.metadata ?? {}), carRig: rig };
+
   // Add shadow casters
   allMeshes.forEach(m => {
     shadowGen.addShadowCaster(m);
@@ -241,4 +256,3 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
 
   return carMesh;
 }
-

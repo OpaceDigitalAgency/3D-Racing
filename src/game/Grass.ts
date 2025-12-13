@@ -29,18 +29,28 @@ varying float vHeight;
 void main() {
     vec3 pos = position;
     vHeight = uv.y;
-    
-    // Wind animation - stronger at top of blade
+
+    // Wind animation - stronger at top of blade with multiple wave layers
     float windInfluence = uv.y * uv.y;
-    float windX = sin(time * 2.0 + pos.x * 0.5 + pos.z * 0.3) * windStrength * windInfluence;
-    float windZ = cos(time * 1.7 + pos.x * 0.3 + pos.z * 0.5) * windStrength * windInfluence * 0.7;
-    
+
+    // Primary wind wave - large sweeping motion
+    float wave1 = sin(time * 2.5 + pos.x * 0.15 + pos.z * 0.12) * 1.2;
+    // Secondary wave - medium turbulence
+    float wave2 = sin(time * 3.8 + pos.x * 0.35 + pos.z * 0.28) * 0.5;
+    // Tertiary wave - fine detail
+    float wave3 = sin(time * 5.2 + pos.x * 0.8 + pos.z * 0.6) * 0.25;
+
+    float windX = (wave1 + wave2 + wave3) * windStrength * windInfluence;
+    float windZ = cos(time * 2.1 + pos.x * 0.2 + pos.z * 0.18) * windStrength * windInfluence * 0.8;
+
     pos.x += windX;
     pos.z += windZ;
-    
+    // Slight vertical bob for realism
+    pos.y += sin(time * 4.0 + pos.x * 0.5) * windStrength * windInfluence * 0.15;
+
     vec4 worldPos = world * vec4(pos, 1.0);
     gl_Position = viewProjection * worldPos;
-    
+
     vNormal = (world * vec4(normal, 0.0)).xyz;
     vUV = uv;
     vColor = color;
@@ -209,12 +219,16 @@ export function createGrassField(scene: Scene, shadowGen: ShadowGenerator | null
   grassMat.backFaceCulling = false;
   grassMesh.material = grassMat;
   
-  // Animate wind
+  // Animate wind with stronger, more dynamic motion
   let time = 0;
   scene.onBeforeRenderObservable.add(() => {
     time += scene.getEngine().getDeltaTime() * 0.001;
     grassMat.setFloat("time", time);
-    grassMat.setFloat("windStrength", 0.15);
+    // Dynamic wind strength with gusts
+    const baseWind = 0.35;
+    const gustStrength = 0.2;
+    const gust = Math.sin(time * 0.7) * Math.sin(time * 1.3) * gustStrength;
+    grassMat.setFloat("windStrength", baseWind + Math.max(0, gust));
   });
   
   return grassMesh;

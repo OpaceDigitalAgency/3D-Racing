@@ -29,6 +29,10 @@ export class CarSim {
   airTime = 0;
 
   private steerSmoothed = 0;
+  private readonly prevVelocity = new Vector3(0, 0, 0);
+  readonly accelWorld = new Vector3(0, 0, 0);
+  accelLongMps2 = 0;
+  accelLatMps2 = 0;
   readonly forwardVec = new Vector3(0, 0, 1);
   readonly rightVec = new Vector3(1, 0, 0);
   private readonly tmpVel = new Vector3(0, 0, 0);
@@ -63,6 +67,10 @@ export class CarSim {
 
   get forwardSpeedMps() {
     return Vector3.Dot(this.velocity, this.forwardVec);
+  }
+
+  get steerRad() {
+    return this.steerSmoothed * this.params.maxSteerRad;
   }
 
   update(
@@ -128,7 +136,7 @@ export class CarSim {
       const grip = surface.grip * (1 - handbrake * (1 - this.params.handbrakeGripScale));
 
       const speed = Math.abs(vF);
-      const steerAngle = this.steerSmoothed * this.params.maxSteerRad;
+      const steerAngle = this.steerRad;
       const yawRate = (vF / Math.max(0.001, this.params.wheelbase)) * Math.tan(steerAngle) * grip;
       this.yawRad += yawRate * dt;
       this.updateBasis();
@@ -189,6 +197,19 @@ export class CarSim {
       } else {
         this.pitchRad += (0 - this.pitchRad) * Math.min(1, 5 * dt);
       }
+    }
+
+    // Acceleration estimate (world + local components) for camera/visual effects.
+    if (dt > 1e-6) {
+      this.velocity.subtractToRef(this.prevVelocity, this.accelWorld).scaleInPlace(1 / dt);
+      this.accelWorld.y = 0;
+      this.accelLongMps2 = Vector3.Dot(this.accelWorld, this.forwardVec);
+      this.accelLatMps2 = Vector3.Dot(this.accelWorld, this.rightVec);
+      this.prevVelocity.copyFrom(this.velocity);
+    } else {
+      this.accelWorld.set(0, 0, 0);
+      this.accelLongMps2 = 0;
+      this.accelLatMps2 = 0;
     }
   }
 }

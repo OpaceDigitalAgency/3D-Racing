@@ -1,17 +1,117 @@
-import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { Scene } from "@babylonjs/core/scene";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
-import { Effect } from "@babylonjs/core/Materials/effect";
-import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { MirrorTexture } from "@babylonjs/core/Materials/Textures/mirrorTexture";
 import { Plane } from "@babylonjs/core/Maths/math.plane";
-import { Constants } from "@babylonjs/core/Engines/constants";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import type { Track } from "./track/Track";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+
+// Puddle position data for collision detection
+export type PuddleInfo = {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+};
+
+export const PUDDLE_POSITIONS: PuddleInfo[] = [
+  { x: 40, z: 0, width: 18, depth: 14 },
+  { x: -30, z: 45, width: 15, depth: 12 },
+  { x: 0, z: -55, width: 20, depth: 10 },
+  { x: 70, z: 30, width: 12, depth: 16 },
+  { x: -60, z: -20, width: 14, depth: 14 },
+];
+
+// Check if a position is inside any water puddle
+export function isInWater(pos: Vector3): PuddleInfo | null {
+  for (const puddle of PUDDLE_POSITIONS) {
+    const dx = Math.abs(pos.x - puddle.x);
+    const dz = Math.abs(pos.z - puddle.z);
+    if (dx < puddle.width / 2 && dz < puddle.depth / 2) {
+      return puddle;
+    }
+  }
+  return null;
+}
+
+// Create water splash particle system
+export function createWaterSplash(scene: Scene): ParticleSystem {
+  const splash = new ParticleSystem("waterSplash", 300, scene);
+
+  // Create water droplet texture
+  const dropCanvas = document.createElement("canvas");
+  dropCanvas.width = 32;
+  dropCanvas.height = 32;
+  const ctx = dropCanvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gradient.addColorStop(0, "rgba(180, 220, 255, 0.9)");
+  gradient.addColorStop(0.3, "rgba(150, 200, 255, 0.7)");
+  gradient.addColorStop(0.6, "rgba(120, 180, 255, 0.4)");
+  gradient.addColorStop(1, "rgba(100, 160, 255, 0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 32, 32);
+
+  splash.particleTexture = new Texture(dropCanvas.toDataURL(), scene);
+  splash.emitter = Vector3.Zero();
+  splash.minEmitBox = new Vector3(-1.5, 0, -1.5);
+  splash.maxEmitBox = new Vector3(1.5, 0.2, 1.5);
+
+  // Water colours - blue-white
+  splash.color1 = new Color4(0.8, 0.9, 1, 0.9);
+  splash.color2 = new Color4(0.6, 0.8, 1, 0.8);
+  splash.colorDead = new Color4(0.5, 0.7, 0.9, 0);
+
+  splash.minSize = 0.08;
+  splash.maxSize = 0.25;
+  splash.minLifeTime = 0.3;
+  splash.maxLifeTime = 0.8;
+
+  splash.emitRate = 0;
+  splash.blendMode = ParticleSystem.BLENDMODE_ADD;
+
+  splash.gravity = new Vector3(0, -12, 0);
+  splash.direction1 = new Vector3(-3, 6, -3);
+  splash.direction2 = new Vector3(3, 10, 3);
+
+  splash.minEmitPower = 4;
+  splash.maxEmitPower = 10;
+  splash.updateSpeed = 0.02;
+
+  splash.start();
+
+  return splash;
+}
+
+// Trigger splash effect
+export function triggerSplash(
+  splashSystem: ParticleSystem,
+  position: Vector3,
+  velocity: Vector3,
+  speed: number
+) {
+  splashSystem.emitter = position.clone();
+
+  // Scale effect with speed
+  const intensity = Math.min(1, speed / 25);
+  splashSystem.emitRate = 100 + intensity * 200;
+  splashSystem.minEmitPower = 3 + intensity * 4;
+  splashSystem.maxEmitPower = 6 + intensity * 8;
+
+  // Spray in direction of travel
+  const dir = velocity.normalize().scale(2);
+  splashSystem.direction1 = new Vector3(-2 + dir.x, 4, -2 + dir.z);
+  splashSystem.direction2 = new Vector3(2 + dir.x, 10, 2 + dir.z);
+}
+
+// Stop splash effect
+export function stopSplash(splashSystem: ParticleSystem) {
+  splashSystem.emitRate = 0;
+}
 
 // Create procedural normal map for water ripples
 function createWaterNormalTexture(scene: Scene, size: number = 512): Texture {
@@ -94,16 +194,8 @@ export function createWater(scene: Scene, track: Track): Mesh[] {
   
   waterMat.reflectionTexture = mirrorTexture;
   
-  // Create water puddles along the track
-  const puddlePositions = [
-    { x: 40, z: 0, width: 18, depth: 14 },
-    { x: -30, z: 45, width: 15, depth: 12 },
-    { x: 0, z: -55, width: 20, depth: 10 },
-    { x: 70, z: 30, width: 12, depth: 16 },
-    { x: -60, z: -20, width: 14, depth: 14 },
-  ];
-  
-  puddlePositions.forEach((pos, i) => {
+  // Create water puddles along the track using shared positions
+  PUDDLE_POSITIONS.forEach((pos, i) => {
     const puddle = MeshBuilder.CreateGround(`waterPuddle${i}`, {
       width: pos.width,
       height: pos.depth,
@@ -121,12 +213,12 @@ export function createWater(scene: Scene, track: Track): Mesh[] {
     time += scene.getEngine().getDeltaTime() * 0.001;
     
     // Animate UV offset for moving ripples
-    if (waterMat.bumpTexture) {
-      waterMat.bumpTexture.uOffset = Math.sin(time * 0.3) * 0.1;
-      waterMat.bumpTexture.vOffset = Math.cos(time * 0.25) * 0.08;
+    const bump = waterMat.bumpTexture;
+    if (bump && bump instanceof Texture) {
+      bump.uOffset = Math.sin(time * 0.3) * 0.1;
+      bump.vOffset = Math.cos(time * 0.25) * 0.08;
     }
   });
   
   return waterPuddles;
 }
-
