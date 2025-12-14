@@ -37,6 +37,7 @@ import { TrackProps } from "./track/TrackProps";
 import { SpeedPadSystem } from "./track/SpeedPads";
 import { BridgeSystem } from "./track/Bridge";
 import { applyTerrainToGround } from "./track/Terrain";
+import { isMobileDevice } from "../shared/qualityPresets";
 
 export type SceneBits = {
   scene: Scene;
@@ -287,6 +288,13 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
 
   // Add logo decal to car roof
   props.addCarDecal(carMesh, '/logos/New-Opace-Logo---High-Quality new.png');
+
+  // Mobile-specific memory optimizations
+  const isMobile = isMobileDevice();
+  if (isMobile) {
+    // Clean up texture cache to free memory
+    scene.cleanCachedTextureBuffer();
+  }
 
   return { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps, speedPads, bridges };
 }
