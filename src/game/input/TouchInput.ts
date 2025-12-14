@@ -18,7 +18,6 @@ export function attachTouchControls(
 ): () => void {
   const activeTouches = new Map<number, { startX: number; startY: number; currentX: number; currentY: number }>();
   const activePointers = new Map<number, { clientX: number; clientY: number }>();
-  const usePointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
   
   // Zone-based controls: left/right halves for steering, top/bottom for throttle/brake
   const processZoneTouch = (touch: Touch) => {
@@ -97,6 +96,7 @@ export function attachTouchControls(
     if (mode === "off") return;
     
     e.preventDefault();
+    e.stopPropagation();
     
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
@@ -124,6 +124,7 @@ export function attachTouchControls(
     if (mode === "off") return;
     
     e.preventDefault();
+    e.stopPropagation();
     
     // Reset inputs before processing moves
     input.steer = 0;
@@ -151,6 +152,7 @@ export function attachTouchControls(
     if (mode === "off") return;
     
     e.preventDefault();
+    e.stopPropagation();
     
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
@@ -179,14 +181,12 @@ export function attachTouchControls(
     }
   };
 
-  // Prefer Pointer Events when available (iOS Safari can be unreliable with Touch Events for canvas input)
-  // to ensure touch controls work consistently across modern mobile browsers.
-  if (!usePointerEvents) {
-    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
-    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
-    canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
-  }
+  // Always use Touch Events for real touch input.
+  // (On iOS Safari, Pointer Events can still allow browser selection/gestures unless touch-action is fully honored.)
+  canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+  canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+  canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+  canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
   // Desktop/testing support: allow mouse/pen pointer to act like touch controls when selected.
   const toTouchLike = (clientX: number, clientY: number, identifier: number): Touch =>
@@ -195,9 +195,11 @@ export function attachTouchControls(
   const onPointerDown = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
+    if (e.pointerType === "touch") return; // handled by Touch Events above
     if (e.pointerType === "mouse" && e.button !== 0) return;
 
     e.preventDefault();
+    e.stopPropagation();
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -220,9 +222,11 @@ export function attachTouchControls(
   const onPointerMove = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
+    if (e.pointerType === "touch") return;
     if (!activePointers.has(e.pointerId)) return;
 
     e.preventDefault();
+    e.stopPropagation();
 
     activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
@@ -241,8 +245,10 @@ export function attachTouchControls(
   const onPointerUpOrCancel = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
+    if (e.pointerType === "touch") return;
 
     e.preventDefault();
+    e.stopPropagation();
     activePointers.delete(e.pointerId);
     try {
       canvas.releasePointerCapture(e.pointerId);
@@ -274,12 +280,10 @@ export function attachTouchControls(
   canvas.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
 
   return () => {
-    if (!usePointerEvents) {
-      canvas.removeEventListener("touchstart", onTouchStart);
-      canvas.removeEventListener("touchmove", onTouchMove);
-      canvas.removeEventListener("touchend", onTouchEnd);
-      canvas.removeEventListener("touchcancel", onTouchEnd);
-    }
+    canvas.removeEventListener("touchstart", onTouchStart);
+    canvas.removeEventListener("touchmove", onTouchMove);
+    canvas.removeEventListener("touchend", onTouchEnd);
+    canvas.removeEventListener("touchcancel", onTouchEnd);
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerup", onPointerUpOrCancel);
