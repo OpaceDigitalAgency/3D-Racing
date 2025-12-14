@@ -14,6 +14,7 @@ import type { ProjectionRef } from "./track/Track";
 import { DamageSystem, createCrashParticles, triggerCrashEffect, applyVisualDamage, createSmokeParticles } from "./effects/CrashEffects";
 import { ExhaustFireSystem } from "./effects/ExhaustFire";
 import { isInWater, createWaterSplash, triggerSplash, stopSplash } from "./Water";
+import { getTerrainHeight } from "./track/Terrain";
 
 type CreateGameArgs = { canvas: HTMLCanvasElement };
 
@@ -263,8 +264,11 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       // Update speed pad visuals
       speedPads.update(dt);
 
-      // Determine ground height - take highest of ramp or bridge
-      const groundHeight = Math.max(rampInfo.height, bridgeInfo.height);
+      // Get terrain height at car position
+      const terrainHeight = getTerrainHeight(sim.position.x, sim.position.z, track.halfWidth);
+
+      // Determine ground height - take highest of terrain, ramp, or bridge
+      const groundHeight = Math.max(terrainHeight, rampInfo.height, bridgeInfo.height);
       const onRampOrBridge = rampInfo.onRamp || bridgeInfo.onBridge;
 
       // Pass ground info to physics with ramp launch data
@@ -287,17 +291,18 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         groundInfo
       );
 
-    // Soft constraint: allow driving on grass but push back if way too far outside
+    // Soft constraint: allow driving anywhere on the terrain but push back at world edges
+    // The ground is 500x500, track center is at origin, so world edge is ~250m from center
+    const worldLimit = 220; // Allow driving up to 220m from track centerline (almost full map)
     const p = projection;
     const overflow = p.distance - track.halfWidth;
-    const softMargin = 25; // Allow up to 25m off track before pushing back
-    if (overflow > softMargin) {
-      const pushStrength = Math.min(0.3, (overflow - softMargin) * 0.02);
+    if (overflow > worldLimit) {
+      const pushStrength = Math.min(0.5, (overflow - worldLimit) * 0.05);
       p.normal.scaleToRef(-pushStrength, tmpVec);
       sim.position.addInPlace(tmpVec);
       const vn = Vector3.Dot(sim.velocity, p.normal);
       if (vn > 0) {
-        p.normal.scaleToRef(-vn * 0.3, tmpVec);
+        p.normal.scaleToRef(-vn * 0.5, tmpVec);
         sim.velocity.addInPlace(tmpVec);
       }
     }

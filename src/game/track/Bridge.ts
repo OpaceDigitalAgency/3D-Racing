@@ -122,6 +122,11 @@ export class BridgeSystem {
     }
   }
 
+  // Ease-in-out curve for smooth ramp profile (starts flat, curves up, ends flat at top)
+  private easeInOutCubic(t: number): number {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
   private createRampMesh(width: number, length: number, height: number, material: PBRMaterial): Mesh {
     const hw = width / 2;
     const hl = length / 2;
@@ -131,47 +136,79 @@ export class BridgeSystem {
     const normals: number[] = [];
     const uvs: number[] = [];
 
-    const slopeAngle = Math.atan2(height, length);
-    const slopeNy = Math.cos(slopeAngle);
-    const slopeNz = -Math.sin(slopeAngle);
+    // Create curved ramp surface with many subdivisions for smooth curve
+    const subdivsX = 4;
+    const subdivsZ = 20;  // More subdivisions along length for smooth curve
 
-    // Top slope face with subdivisions
-    const subdivs = 6;
-    for (let i = 0; i <= subdivs; i++) {
-      for (let j = 0; j <= subdivs; j++) {
-        const u = i / subdivs;
-        const v = j / subdivs;
+    for (let i = 0; i <= subdivsX; i++) {
+      for (let j = 0; j <= subdivsZ; j++) {
+        const u = i / subdivsX;
+        const v = j / subdivsZ;
         const x = -hw + u * width;
         const z = -hl + v * length;
-        const y = v * height;
+        // Use ease-in-out curve for natural ramp shape - starts flat, curves up, flattens at top
+        const y = this.easeInOutCubic(v) * height;
         positions.push(x, y, z);
-        normals.push(0, slopeNy, slopeNz);
+
+        // Calculate normal based on curve derivative
+        const dv = 0.01;
+        const y1 = this.easeInOutCubic(Math.max(0, v - dv)) * height;
+        const y2 = this.easeInOutCubic(Math.min(1, v + dv)) * height;
+        const slope = (y2 - y1) / (dv * 2 * length);
+        const ny = 1 / Math.sqrt(1 + slope * slope);
+        const nz = -slope * ny;
+        normals.push(0, ny, nz);
         uvs.push(u, v);
       }
     }
 
-    for (let i = 0; i < subdivs; i++) {
-      for (let j = 0; j < subdivs; j++) {
-        const a = i * (subdivs + 1) + j;
+    for (let i = 0; i < subdivsX; i++) {
+      for (let j = 0; j < subdivsZ; j++) {
+        const a = i * (subdivsZ + 1) + j;
         const b = a + 1;
-        const c = a + subdivs + 1;
+        const c = a + subdivsZ + 1;
         const d = c + 1;
         indices.push(a, c, b, b, c, d);
       }
     }
 
-    // Side faces
-    const leftStart = positions.length / 3;
-    positions.push(-hw, 0, -hl, -hw, 0, hl, -hw, height, hl);
-    for (let i = 0; i < 3; i++) normals.push(-1, 0, 0);
-    uvs.push(0, 0, 1, 0, 0.5, 1);
-    indices.push(leftStart, leftStart + 1, leftStart + 2);
+    // Side faces - create curved side walls
+    const sideSubdivs = 10;
+    for (const sideX of [-hw, hw]) {
+      const sideStart = positions.length / 3;
+      const sideNormal = sideX < 0 ? -1 : 1;
 
-    const rightStart = positions.length / 3;
-    positions.push(hw, 0, -hl, hw, height, hl, hw, 0, hl);
-    for (let i = 0; i < 3; i++) normals.push(1, 0, 0);
-    uvs.push(0, 0, 0.5, 1, 1, 0);
-    indices.push(rightStart, rightStart + 1, rightStart + 2);
+      // Bottom edge vertices
+      for (let j = 0; j <= sideSubdivs; j++) {
+        const v = j / sideSubdivs;
+        const z = -hl + v * length;
+        positions.push(sideX, 0, z);
+        normals.push(sideNormal, 0, 0);
+        uvs.push(v, 0);
+      }
+      // Top edge vertices (curved)
+      for (let j = 0; j <= sideSubdivs; j++) {
+        const v = j / sideSubdivs;
+        const z = -hl + v * length;
+        const y = this.easeInOutCubic(v) * height;
+        positions.push(sideX, y, z);
+        normals.push(sideNormal, 0, 0);
+        uvs.push(v, 1);
+      }
+
+      // Connect bottom and top edges
+      for (let j = 0; j < sideSubdivs; j++) {
+        const bl = sideStart + j;
+        const br = sideStart + j + 1;
+        const tl = sideStart + sideSubdivs + 1 + j;
+        const tr = sideStart + sideSubdivs + 2 + j;
+        if (sideX < 0) {
+          indices.push(bl, tl, br, br, tl, tr);
+        } else {
+          indices.push(bl, br, tl, tl, br, tr);
+        }
+      }
+    }
 
     const ramp = new Mesh("bridgeRamp", this.scene);
     const vertexData = new VertexData();
@@ -186,7 +223,7 @@ export class BridgeSystem {
     return ramp;
   }
 
-  // Get height at a position (for physics) - includes ramps
+  // Get height at a position (for physics) - includes ramps with eased curve
   getHeightAt(pos: Vector3): { height: number; onBridge: boolean } {
     for (const bridge of this.bridges) {
       const { start, end, width, height, rampLength, direction: dir } = bridge;
@@ -205,7 +242,9 @@ export class BridgeSystem {
       // Start ramp: from -rampLength to 0 (relative to start point)
       if (along >= -rampLength && along < 0) {
         const t = (along + rampLength) / rampLength;  // 0 at ground, 1 at deck height
-        return { height: t * height, onBridge: true };
+        // Use same eased curve as visual ramp for consistent physics
+        const easedT = this.easeInOutCubic(t);
+        return { height: easedT * height, onBridge: true };
       }
 
       // Main deck: from 0 to deckLength
@@ -215,8 +254,10 @@ export class BridgeSystem {
 
       // End ramp: from deckLength to deckLength + rampLength
       if (along > deckLength && along <= deckLength + rampLength) {
-        const t = 1 - (along - deckLength) / rampLength;  // 1 at deck, 0 at ground
-        return { height: t * height, onBridge: true };
+        const t = (along - deckLength) / rampLength;  // 0 at deck, 1 at ground
+        // Use inverse eased curve - t goes from 0 to 1 as we descend
+        const easedT = this.easeInOutCubic(1 - t);
+        return { height: easedT * height, onBridge: true };
       }
     }
     return { height: 0, onBridge: false };

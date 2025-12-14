@@ -248,16 +248,16 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   const props = new TrackProps(scene, track, shadowGen);
 
   // Add banners with Opace logos - alternating two approved versions, visible from both sides
-  props.addBanner(0.05, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
-  props.addBanner(0.20, 'left', 'logos/website design agency logo.png', 7, 12);
-  props.addBanner(0.35, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
-  props.addBanner(0.50, 'left', 'logos/website design agency logo.png', 7, 12);
-  props.addBanner(0.65, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
-  props.addBanner(0.80, 'left', 'logos/website design agency logo.png', 7, 12);
-  props.addBanner(0.95, 'right', 'logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.05, 'right', '/logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.20, 'left', '/logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.35, 'right', '/logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.50, 'left', '/logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.65, 'right', '/logos/New-Opace-Logo---High-Quality new.png', 7, 12);
+  props.addBanner(0.80, 'left', '/logos/website design agency logo.png', 7, 12);
+  props.addBanner(0.95, 'right', '/logos/New-Opace-Logo---High-Quality new.png', 7, 12);
 
   // Add logo decal to car roof
-  props.addCarDecal(carMesh, 'logos/New-Opace-Logo---High-Quality new.png');
+  props.addCarDecal(carMesh, '/logos/New-Opace-Logo---High-Quality new.png');
 
   return { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps, speedPads, bridges };
 }
