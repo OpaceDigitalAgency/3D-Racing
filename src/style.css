@@ -52,9 +52,33 @@ canvas {
   backdrop-filter: blur(10px);
 }
 
+.ui--mobile {
+  width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+.ui__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ui__close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+
 .ui h1 {
   font-size: 13px;
-  margin: 0 0 8px;
+  margin: 0;
   letter-spacing: 0.6px;
 }
 
@@ -243,4 +267,95 @@ canvas {
 .touch-btn--brake {
   border-color: rgba(255, 89, 103, 0.2);
   background: rgba(255, 89, 103, 0.05);
+}
+
+/* Mobile HUD - minimal overlay */
+.mobile-hud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.mobile-hud__speed {
+  font: 800 32px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--accent);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  letter-spacing: -0.5px;
+}
+
+.mobile-hud__speed span {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: 4px;
+}
+
+.mobile-hud__lap,
+.mobile-hud__best {
+  font: 600 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.mobile-hud__lap span,
+.mobile-hud__best span {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-right: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* Mobile settings button */
+.mobile-settings-btn {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panelBorder);
+  backdrop-filter: blur(10px);
+  font-size: 20px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.mobile-settings-btn:active {
+  transform: scale(0.95);
+}
+
+/* Mobile reset button */
+.mobile-reset-btn {
+  position: fixed;
+  top: 64px;
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panelBorder);
+  backdrop-filter: blur(10px);
+  font-size: 24px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: var(--text);
+}
+
+.mobile-reset-btn:active {
+  transform: scale(0.95);
 }

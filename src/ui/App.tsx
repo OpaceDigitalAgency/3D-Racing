@@ -17,8 +17,11 @@ export function App({ game }: { game: GameAPI }) {
   const [touchMode, setTouchMode] = useState<TouchControlMode>(t.touchControlMode);
   const [sensitivity, setSensitivity] = useState<number>(t.steeringSensitivity);
   const [zoom, setZoom] = useState<number>(t.zoomLevel);
+  // On mobile, panel is collapsed by default for better gameplay experience
+  const [panelExpanded, setPanelExpanded] = useState<boolean>(!t.isMobile);
 
   const presets = useMemo(() => QUALITY_PRESETS, []);
+  const isMobile = t.isMobile;
 
   const blurAndRefocusCanvas = (el: HTMLElement | null) => {
     el?.blur?.();
@@ -51,62 +54,105 @@ export function App({ game }: { game: GameAPI }) {
     game.setZoomLevel(zoom);
   }, [game, zoom]);
 
+  // Mobile compact UI - just show minimal HUD
+  if (isMobile && !panelExpanded) {
+    return (
+      <>
+        <TouchOverlay mode={touchMode} visible={true} />
+        {/* Minimal mobile HUD */}
+        <div className="mobile-hud">
+          <div className="mobile-hud__speed">{Math.round(t.speedKph)} <span>km/h</span></div>
+          <div className="mobile-hud__lap">
+            <span>LAP</span> {fmtTime(t.lapTimeSeconds)}
+          </div>
+          {t.bestLapSeconds != null && (
+            <div className="mobile-hud__best">
+              <span>BEST</span> {fmtTime(t.bestLapSeconds)}
+            </div>
+          )}
+        </div>
+        {/* Settings button to expand panel */}
+        <button
+          className="mobile-settings-btn"
+          onClick={() => setPanelExpanded(true)}
+          aria-label="Open settings"
+        >
+          ⚙️
+        </button>
+        {/* Reset button for mobile */}
+        <button
+          className="mobile-reset-btn"
+          onClick={() => game.reset()}
+          aria-label="Reset car"
+        >
+          ↻
+        </button>
+      </>
+    );
+  }
+
   return (
     <>
-      <TouchOverlay mode={touchMode} visible={t.isMobile || touchMode !== "off"} />
-      <div className="ui">
-        <h1>APEX//WEB</h1>
+      <TouchOverlay mode={touchMode} visible={isMobile || touchMode !== "off"} />
+      <div className={`ui ${isMobile ? 'ui--mobile' : ''}`}>
+        <div className="ui__header">
+          <h1>APEX//WEB</h1>
+          {isMobile && (
+            <button
+              className="ui__close-btn"
+              onClick={() => setPanelExpanded(false)}
+              aria-label="Close settings"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+      {/* Debug info - hide on mobile */}
+      {!isMobile && (
+        <>
+          <div className="row">
+            <span><b>Renderer</b></span>
+            <span>{t.renderer.toUpperCase()}</span>
+          </div>
+          <div className="row">
+            <span><b>FPS</b></span>
+            <span>{t.fps}</span>
+          </div>
+        </>
+      )}
 
       <div className="row">
-        <span>
-          <b>Renderer</b>
-        </span>
-        <span>{t.renderer.toUpperCase()}</span>
-      </div>
-      <div className="row">
-        <span>
-          <b>FPS</b>
-        </span>
-        <span>{t.fps}</span>
-      </div>
-      <div className="row">
-        <span>
-          <b>Speed</b>
-        </span>
+        <span><b>Speed</b></span>
         <span>{Math.round(t.speedKph)} km/h</span>
       </div>
+
+      {/* Hide input/focus debug on mobile */}
+      {!isMobile && (
+        <>
+          <div className="row">
+            <span><b>Input</b></span>
+            <span>
+              T{t.input.throttle.toFixed(1)} B{t.input.brake.toFixed(1)} S{t.input.steer.toFixed(1)} H{t.input.handbrake.toFixed(1)}
+            </span>
+          </div>
+          <div className="row">
+            <span><b>Focus</b></span>
+            <span>{t.focus.hasDocumentFocus ? "yes" : "no"} / {t.focus.activeElementTag}</span>
+          </div>
+        </>
+      )}
+
       <div className="row">
-        <span>
-          <b>Input</b>
-        </span>
-        <span>
-          T{t.input.throttle.toFixed(1)} B{t.input.brake.toFixed(1)} S{t.input.steer.toFixed(1)} H{t.input.handbrake.toFixed(1)}
-        </span>
-      </div>
-      <div className="row">
-        <span>
-          <b>Focus</b>
-        </span>
-        <span>
-          {t.focus.hasDocumentFocus ? "yes" : "no"} / {t.focus.activeElementTag}
-        </span>
-      </div>
-      <div className="row">
-        <span>
-          <b>Lap</b>
-        </span>
+        <span><b>Lap</b></span>
         <span>{fmtTime(t.lapTimeSeconds)}</span>
       </div>
       <div className="row">
-        <span>
-          <b>Best</b>
-        </span>
+        <span><b>Best</b></span>
         <span>{t.bestLapSeconds == null ? "—" : fmtTime(t.bestLapSeconds)}</span>
       </div>
       <div className="row">
-        <span>
-          <b>Laps</b>
-        </span>
+        <span><b>Laps</b></span>
         <span>{t.laps}</span>
       </div>
 
@@ -146,63 +192,109 @@ export function App({ game }: { game: GameAPI }) {
         <button onClick={() => game.reset()}>Reset (R)</button>
       </div>
 
-      <div className="controls">
-        <label>
-          Touch Controls
-          <select
-            value={touchMode}
-            onChange={(e) => {
-              setTouchMode(e.target.value as TouchControlMode);
-              blurAndRefocusCanvas(e.currentTarget);
-            }}
-          >
-            {TOUCH_CONTROL_MODES.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Sensitivity: {sensitivity.toFixed(1)}
-          <input
-            type="range"
-            min="0.2"
-            max="1.5"
-            step="0.1"
-            value={sensitivity}
-            onChange={(e) => setSensitivity(parseFloat(e.target.value))}
-            style={{ width: 80 }}
-          />
-        </label>
-        <label>
-          Zoom: {zoom.toFixed(1)}x
-          <input
-            type="range"
-            min="0.15"
-            max="1.5"
-            step="0.05"
-            value={zoom}
-            onChange={(e) => setZoom(parseFloat(e.target.value))}
-            style={{ width: 80 }}
-          />
-        </label>
-      </div>
+      {/* Touch controls section - more prominent on mobile */}
+      {isMobile && (
+        <div className="controls">
+          <label>
+            Touch Controls
+            <select
+              value={touchMode}
+              onChange={(e) => {
+                setTouchMode(e.target.value as TouchControlMode);
+                blurAndRefocusCanvas(e.currentTarget);
+              }}
+            >
+              {TOUCH_CONTROL_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sensitivity: {sensitivity.toFixed(1)}
+            <input
+              type="range"
+              min="0.2"
+              max="1.5"
+              step="0.1"
+              value={sensitivity}
+              onChange={(e) => setSensitivity(parseFloat(e.target.value))}
+              style={{ width: 80 }}
+            />
+          </label>
+        </div>
+      )}
 
+      {/* Desktop-only controls */}
+      {!isMobile && (
+        <div className="controls">
+          <label>
+            Touch Controls
+            <select
+              value={touchMode}
+              onChange={(e) => {
+                setTouchMode(e.target.value as TouchControlMode);
+                blurAndRefocusCanvas(e.currentTarget);
+              }}
+            >
+              {TOUCH_CONTROL_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sensitivity: {sensitivity.toFixed(1)}
+            <input
+              type="range"
+              min="0.2"
+              max="1.5"
+              step="0.1"
+              value={sensitivity}
+              onChange={(e) => setSensitivity(parseFloat(e.target.value))}
+              style={{ width: 80 }}
+            />
+          </label>
+          <label>
+            Zoom: {zoom.toFixed(1)}x
+            <input
+              type="range"
+              min="0.15"
+              max="1.5"
+              step="0.05"
+              value={zoom}
+              onChange={(e) => setZoom(parseFloat(e.target.value))}
+              style={{ width: 80 }}
+            />
+          </label>
+        </div>
+      )}
+
+      {/* Hints - different for mobile vs desktop */}
       <div className="hint">
-        <div>
-          <b>Keyboard:</b> <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> or Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset, <kbd>C</kbd> camera
-        </div>
-        <div style={{ marginTop: 4 }}>
-          <b>Zoom:</b> Mouse wheel to zoom in/out (see whole track at min zoom)
-        </div>
-        {t.isMobile && (
-          <div style={{ marginTop: 4 }}>
+        {!isMobile && (
+          <>
+            <div>
+              <b>Keyboard:</b> <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> or Arrows, <kbd>Space</kbd> handbrake, <kbd>R</kbd> reset, <kbd>C</kbd> camera
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <b>Zoom:</b> Mouse wheel to zoom in/out (see whole track at min zoom)
+            </div>
+          </>
+        )}
+        {isMobile && (
+          <div>
             <b>Touch:</b> {touchMode === "zones" ? "Tap left/right to steer, top/bottom for throttle/brake" :
               touchMode === "dpad" ? "Use virtual D-pad (left) and buttons (right)" : "Touch controls disabled"}
           </div>
         )}
-        <div style={{ marginTop: 6 }}>Tip: Lower sensitivity for smoother steering. WebGPU + High/Ultra looks best.</div>
+        <div style={{ marginTop: 6 }}>
+          {isMobile
+            ? "Tip: Lower sensitivity for smoother steering."
+            : "Tip: Lower sensitivity for smoother steering. WebGPU + High/Ultra looks best."}
+        </div>
       </div>
       </div>
     </>
