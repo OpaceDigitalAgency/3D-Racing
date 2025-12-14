@@ -19,6 +19,12 @@ export function attachTouchControls(
   const activeTouches = new Map<number, { startX: number; startY: number; currentX: number; currentY: number }>();
   const activePointers = new Map<number, { clientX: number; clientY: number }>();
   
+  const prevent = (e: Event) => {
+    // On iOS, preventDefault only works when the event is cancelable.
+    if ("cancelable" in e && (e as any).cancelable) (e as any).preventDefault?.();
+    (e as any).stopPropagation?.();
+  };
+
   // Zone-based controls: left/right halves for steering, top/bottom for throttle/brake
   const processZoneTouch = (touch: Touch) => {
     const rect = canvas.getBoundingClientRect();
@@ -54,29 +60,40 @@ export function attachTouchControls(
     const width = rect.width;
     const height = rect.height;
     
-    // Left side D-pad for steering (bottom left corner)
-    const dpadCenterX = width * 0.15;
-    const dpadCenterY = height * 0.75;
-    const dpadRadius = Math.min(width, height) * 0.12;
+    // Match the TouchOverlay.css layout:
+    // .touch-dpad { left: 5vw; bottom: 7vh; width/height: min(26vmin, 170px) }
+    // .touch-buttons { right: 5vw; bottom: 7vh; buttons: min(18vmin, 120px); gap: 12px; GO above BRAKE }
+    const vmin = Math.min(width, height) / 100;
+
+    const dpadSize = Math.min(26 * vmin, 170);
+    const dpadLeft = width * 0.05;
+    const dpadBottom = height * 0.07;
+    const dpadCenterX = dpadLeft + dpadSize / 2;
+    const dpadCenterY = height - dpadBottom - dpadSize / 2;
+    const dpadRadius = dpadSize / 2;
     
     const dpadDx = x - dpadCenterX;
     const dpadDy = y - dpadCenterY;
     const dpadDist = Math.sqrt(dpadDx * dpadDx + dpadDy * dpadDy);
     
-    if (dpadDist < dpadRadius * 2) {
+    if (dpadDist < dpadRadius * 1.35) {
       // Within steering zone
       input.steer = Math.max(-1, Math.min(1, dpadDx / dpadRadius));
     }
     
     // Right side controls for throttle/brake (bottom right corner)
-    const throttleCenterX = width * 0.85;
-    const throttleCenterY = height * 0.65;
-    const brakeCenterY = height * 0.85;
-    const buttonRadius = Math.min(width, height) * 0.08;
+    const buttonSize = Math.min(18 * vmin, 120);
+    const buttonRight = width * 0.05;
+    const buttonBottom = height * 0.07;
+    const buttonCenterX = width - buttonRight - buttonSize / 2;
+    const brakeCenterY = height - buttonBottom - buttonSize / 2;
+    const gap = 12;
+    const throttleCenterY = brakeCenterY - (buttonSize + gap);
+    const buttonRadius = buttonSize * 0.65;
     
     // Check throttle button
     const throttleDist = Math.sqrt(
-      Math.pow(x - throttleCenterX, 2) + Math.pow(y - throttleCenterY, 2)
+      Math.pow(x - buttonCenterX, 2) + Math.pow(y - throttleCenterY, 2)
     );
     if (throttleDist < buttonRadius) {
       input.throttle = 1;
@@ -84,7 +101,7 @@ export function attachTouchControls(
     
     // Check brake button
     const brakeDist = Math.sqrt(
-      Math.pow(x - throttleCenterX, 2) + Math.pow(y - brakeCenterY, 2)
+      Math.pow(x - buttonCenterX, 2) + Math.pow(y - brakeCenterY, 2)
     );
     if (brakeDist < buttonRadius) {
       input.brake = 1;
@@ -95,8 +112,7 @@ export function attachTouchControls(
     const mode = getControlMode();
     if (mode === "off") return;
     
-    e.preventDefault();
-    e.stopPropagation();
+    prevent(e);
     
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
@@ -123,8 +139,7 @@ export function attachTouchControls(
     const mode = getControlMode();
     if (mode === "off") return;
     
-    e.preventDefault();
-    e.stopPropagation();
+    prevent(e);
     
     // Reset inputs before processing moves
     input.steer = 0;
@@ -151,8 +166,7 @@ export function attachTouchControls(
     const mode = getControlMode();
     if (mode === "off") return;
     
-    e.preventDefault();
-    e.stopPropagation();
+    prevent(e);
     
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
