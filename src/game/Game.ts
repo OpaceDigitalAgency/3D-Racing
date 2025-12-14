@@ -96,12 +96,16 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const applyQuality = (id: QualityPresetId) => {
     const preset = QUALITY_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[2];
     quality = preset.id;
-    const hardwareScalingLevel = 1 / preset.resolutionScale;
+    // Babylon's `hardwareScalingLevel` is the inverse of pixel ratio: lower = sharper (more pixels).
+    // Scale relative to devicePixelRatio so "Ultra" isn't unintentionally low-res on Retina/high-DPI.
+    const devicePixelRatio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const hardwareScalingLevel = 1 / (preset.resolutionScale * devicePixelRatio);
     engine.setHardwareScalingLevel(hardwareScalingLevel);
 
     // Debug logging to verify quality settings
     console.log(`[Quality] Applied: ${preset.id}`, {
       resolutionScale: preset.resolutionScale,
+      devicePixelRatio,
       hardwareScalingLevel,
       shadowMapSize: preset.shadows.mapSize,
       renderWidth: engine.getRenderWidth(),
@@ -113,8 +117,10 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     shadowGen.blurKernel = preset.shadows.blurKernel;
     shadowGen.setDarkness(preset.shadows.enabled ? 0.42 : 0.0);
 
+    const taaEnabled = Boolean(taa && preset.post.taa);
     if (taa) taa.isEnabled = preset.post.taa;
-    pipeline.fxaaEnabled = preset.post.fxaa && !preset.post.taa;
+    // If TAA isn't available/enabled, force FXAA on as a safety net (otherwise "ultra" can look jaggy).
+    pipeline.fxaaEnabled = preset.post.fxaa || !taaEnabled;
     pipeline.bloomEnabled = preset.post.bloom;
 
     pipeline.chromaticAberrationEnabled = preset.id === "high" || preset.id === "ultra";

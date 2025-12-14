@@ -16,10 +16,16 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<CreatedEn
     }
   }
 
-  const engine = new Engine(canvas, true, {
-    preserveDrawingBuffer: false,
-    stencil: true,
-    disableWebGL2Support: false
-  });
+  // Match WebGPU's crispness on high-DPI displays by adapting to device ratio.
+  const engine = new Engine(
+    canvas,
+    true,
+    {
+      preserveDrawingBuffer: false,
+      stencil: true,
+      disableWebGL2Support: false
+    },
+    true
+  );
   return { engine, renderer: "webgl2" };
 }

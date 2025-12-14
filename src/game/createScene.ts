@@ -120,9 +120,10 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   skyboxMat.backFaceCulling = false;
 
   if (env) {
-    // Share the same texture reference instead of cloning (saves memory)
-    skyboxMat.reflectionTexture = env;
-    skyboxMat.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
+    // Clone the environment texture for skybox - IMPORTANT: sharing the same reference
+    // and changing coordinatesMode would break PBR reflections on the car
+    skyboxMat.reflectionTexture = env.clone();
+    skyboxMat.reflectionTexture!.coordinatesMode = Texture.SKYBOX_MODE;
   } else {
     // Fallback: solid colour skybox
     skyboxMat.albedoColor = new Color3(0.45, 0.65, 0.85);

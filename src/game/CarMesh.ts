@@ -251,7 +251,10 @@ export function createCarMesh(scene: Scene, shadowGen: ShadowGenerator): Mesh {
   // Add shadow casters
   allMeshes.forEach(m => {
     shadowGen.addShadowCaster(m);
-    m.receiveShadows = true;
+    // Avoid self-shadowing artifacts ("shadow acne") on glossy PBR surfaces.
+    // The car should cast onto the world, but receiving sun shadows on the car body tends to look noisy
+    // with blurred/contact-hardened shadow settings.
+    m.receiveShadows = false;
   });
 
   return carMesh;
