@@ -236,9 +236,13 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   speedPads.addPadOnTrack(0.52, 6, 10);   // Mid opposite straight
   speedPads.addPadOnTrack(0.78, 6, 10);   // Before final corner
 
-  // Create bridge connecting parts of the track
+  // Create bridge/overpass that crosses the infield
+  // The track is a rounded rectangle with halfX=95, halfZ=70, halfWidth=8
+  // Bridge spans across the grass from left straight (x=-95) to right straight (x=95) at z=0
+  // The ramps (length = height * 4) will connect the bridge deck to the track surface
   const bridges = new BridgeSystem(scene, shadowGen);
-  bridges.addBridge(-40, 30, 40, -30, 12, 5);  // Diagonal bridge across infield
+  // Overpass crossing the infield - ramps start on each side of the track
+  bridges.addBridge(-83, 0, 83, 0, 10, 3);
 
   // Add sponsor banners and props around the track
   const props = new TrackProps(scene, track, shadowGen);

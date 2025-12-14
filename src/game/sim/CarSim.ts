@@ -210,16 +210,19 @@ export class CarSim {
       const len = this.tmpVel.length();
       if (len > max) this.tmpVel.scaleInPlace(max / len);
 
-      // Ramp jump physics - launch when at edge of ramp
+      // Ramp jump physics - only launch when truly at the edge of the ramp
       if (ground.onRamp && ground.atRampEdge && ground.rampAngle && vF2 > 8) {
-        // At the top of the ramp - apply launch velocity based on speed and ramp angle
-        const launchMultiplier = 0.35;  // How much forward speed converts to upward velocity
+        // At the very top of the ramp - apply realistic launch velocity
+        // The car should maintain its forward momentum and gain upward velocity based on the ramp angle
+        const launchMultiplier = 0.55;  // Realistic conversion of forward to upward velocity
         const upwardVelocity = vF2 * Math.sin(ground.rampAngle) * launchMultiplier;
-        this.tmpVel.y = Math.max(upwardVelocity, 4);  // Minimum upward velocity for satisfying jump
+        this.tmpVel.y = Math.max(upwardVelocity, 3);  // Minimum upward velocity for satisfying jump
+        // Mark as airborne immediately after launch
+        this.isAirborne = true;
       } else if (ground.onRamp) {
-        // On ramp but not at edge - follow the slope smoothly
-        const slopeFollow = vF2 * Math.sin(ground.rampAngle || 0) * 0.15;
-        this.tmpVel.y = slopeFollow;
+        // On ramp but not at edge - car stays grounded and follows the surface
+        // No upward velocity while driving on the ramp - car hugs the surface
+        this.tmpVel.y = 0;
       } else {
         this.tmpVel.y = 0;
       }
