@@ -34,15 +34,36 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const { engine, renderer } = await createEngine(canvas);
   const { scene, camera, shadowGen, pipeline, taa, ssao2, ssr, motionBlur, carMesh, track, ramps, speedPads, bridges } = await createScene(engine, canvas);
 
+  // Input sources are polled independently and merged each frame.
+  // (Keyboard input runs a RAF loop and would otherwise overwrite touch inputs on mobile.)
   const input = new InputState();
-  const detachKeyboard = attachKeyboard(input, canvas);
-  attachGamepad(input);
+  const keyboardInput = new InputState();
+  const touchInput = new InputState();
+  const gamepadInput = new InputState();
+  const uiInput = new InputState();
+
+  attachKeyboard(keyboardInput, canvas);
+  attachGamepad(gamepadInput);
 
   // Touch controls for mobile devices
   const isMobile = isMobileDevice();
-  let touchControlMode: TouchControlMode = isMobile ? "zones" : "off";
+  let touchControlMode: TouchControlMode = isMobile ? "dpad" : "off";
   const getTouchControlMode = () => touchControlMode;
-  const detachTouch = attachTouchControls(input, canvas, getTouchControlMode);
+  attachTouchControls(touchInput, canvas, getTouchControlMode);
+
+  const mergeInputs = () => {
+    input.throttle = Math.max(keyboardInput.throttle, touchInput.throttle, gamepadInput.throttle);
+    input.brake = Math.max(keyboardInput.brake, touchInput.brake, gamepadInput.brake);
+    input.handbrake = Math.max(keyboardInput.handbrake, touchInput.handbrake, gamepadInput.handbrake);
+
+    const deadzone = 0.05;
+    if (Math.abs(gamepadInput.steer) > deadzone) input.steer = gamepadInput.steer;
+    else if (Math.abs(keyboardInput.steer) > 0) input.steer = keyboardInput.steer;
+    else input.steer = touchInput.steer;
+
+    input.resetPressed = uiInput.resetPressed || keyboardInput.resetPressed || gamepadInput.resetPressed;
+    input.cameraNextPressed = keyboardInput.cameraNextPressed || gamepadInput.cameraNextPressed;
+  };
 
   // Control sensitivity (0.3 = smooth, 1.0 = responsive, default 0.7)
   let steeringSensitivity = 0.7;
@@ -275,6 +296,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
 
   const tickSim = (dt: number) => {
     try {
+      mergeInputs();
       const { projection, onTrack } = track.surfaceAtToRef(sim.position, projRef);
 
       // Improved off-road surface - still driveable but with reduced performance
@@ -477,6 +499,9 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     // Reset
     if (input.resetPressed) {
       input.resetPressed = false;
+      uiInput.resetPressed = false;
+      keyboardInput.resetPressed = false;
+      gamepadInput.resetPressed = false;
       laps = 0;
       bestLapSeconds = null;
       lapStartMs = performance.now();
@@ -502,6 +527,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     // Cycle camera view with C key
     if (input.cameraNextPressed) {
       input.cameraNextPressed = false;
+      keyboardInput.cameraNextPressed = false;
+      gamepadInput.cameraNextPressed = false;
       const currentIdx = CAMERA_VIEWS.findIndex(v => v.id === cameraView);
       const nextIdx = (currentIdx + 1) % CAMERA_VIEWS.length;
       setCameraView(CAMERA_VIEWS[nextIdx].id);
@@ -681,7 +708,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const resize = () => engine.resize();
 
   const reset = () => {
-    input.resetPressed = true;
+    uiInput.resetPressed = true;
   };
 
   const getTelemetry = (): TelemetrySnapshot => ({
