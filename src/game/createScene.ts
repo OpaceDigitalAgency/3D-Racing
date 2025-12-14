@@ -258,17 +258,19 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
 
   // Curved on/off-ramp overpass route (realistic merge + rejoin).
   const bridges = new BridgeSystem(scene, shadowGen);
-  // Use the right straight (x≈95) and peel into the infield, then rejoin later.
+  // Use the right straight (x≈95) - start/end on track, curves inward to overpass.
+  // Track halfWidth is 8, so track edge inner side is at x=95-8=87, outer at x=95+8=103
+  // Bridge starts/ends at x=95 (on track centerline) so car can drive onto it
   bridges.addCurvedOverpass({
-    startX: 90,
+    startX: 95,      // On the track centerline
     startZ: -45,
-    endX: 90,
+    endX: 95,        // Returns to track centerline
     endZ: 45,
-    deckX: 72,
+    deckX: 72,       // Elevated deck curves infield
     deckStartZ: -20,
     deckEndZ: 20,
     width: 10,
-    height: 3
+    height: 3.5      // Slightly higher to clear track
   });
 
   // Add sponsor banners and props around the track

@@ -84,11 +84,15 @@ export class BridgeSystem {
     // Ease-in-out cubic (same shape used for ramps elsewhere).
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
+    // Minimum elevation to prevent z-fighting with ground
+    const minElevation = 0.15;
+
     for (let i = 0; i <= rampSteps; i++) {
       const t = i / rampSteps;
       const x = cubic(p0.x, p1.x, p2.x, p3.x, t);
       const z = cubic(p0.z, p1.z, p2.z, p3.z, t);
-      const y = ease(t) * height;
+      // Add minimum elevation to prevent z-fighting at ground level
+      const y = minElevation + ease(t) * (height - minElevation);
       path.push(new Vector3(x, y, z));
     }
 
@@ -103,7 +107,8 @@ export class BridgeSystem {
       const t = i / rampSteps;
       const x = cubic(q0.x, q1.x, q2.x, q3.x, t);
       const z = cubic(q0.z, q1.z, q2.z, q3.z, t);
-      const y = ease(1 - t) * height;
+      // Add minimum elevation to prevent z-fighting at ground level
+      const y = minElevation + ease(1 - t) * (height - minElevation);
       path.push(new Vector3(x, y, z));
     }
 
@@ -118,10 +123,18 @@ export class BridgeSystem {
     deckMat.albedoColor = new Color3(0.2, 0.2, 0.22);
     deckMat.roughness = 0.85;
     deckMat.metallic = 0.05;
+    // Prevent z-fighting with ground
+    deckMat.zOffset = -2;
+
+    // Railing material - red/white safety (matching straight bridges)
+    const railMat = new PBRMaterial("overpassRailMat", this.scene);
+    railMat.albedoColor = new Color3(0.9, 0.2, 0.15);
+    railMat.roughness = 0.5;
+    railMat.metallic = 0.2;
 
     const roadShape = [
-      new Vector3(-width / 2, 0.08, 0),
-      new Vector3(width / 2, 0.08, 0),
+      new Vector3(-width / 2, 0.12, 0),
+      new Vector3(width / 2, 0.12, 0),
       new Vector3(width / 2, 0.0, 0),
       new Vector3(-width / 2, 0.0, 0)
     ];
@@ -134,6 +147,70 @@ export class BridgeSystem {
     mesh.material = deckMat;
     mesh.receiveShadows = true;
     if (this.shadowGen) this.shadowGen.addShadowCaster(mesh);
+
+    // Create side railings along the curved path
+    const railHeight = 0.6;
+    const railWidth = 0.08;
+    const halfWidth = width / 2;
+
+    // Create railing shape for extrusion
+    const railShape = [
+      new Vector3(-railWidth / 2, railHeight, 0),
+      new Vector3(railWidth / 2, railHeight, 0),
+      new Vector3(railWidth / 2, 0, 0),
+      new Vector3(-railWidth / 2, 0, 0)
+    ];
+
+    // Left railing path (offset from centre)
+    const leftRailPath = path.map(p => {
+      // Calculate direction to next point for perpendicular offset
+      const idx = path.indexOf(p);
+      let dir: Vector3;
+      if (idx < path.length - 1) {
+        dir = path[idx + 1].subtract(p).normalize();
+      } else {
+        dir = p.subtract(path[idx - 1]).normalize();
+      }
+      const perp = new Vector3(-dir.z, 0, dir.x);
+      return new Vector3(
+        p.x + perp.x * (halfWidth - railWidth),
+        p.y + 0.12,
+        p.z + perp.z * (halfWidth - railWidth)
+      );
+    });
+
+    // Right railing path
+    const rightRailPath = path.map(p => {
+      const idx = path.indexOf(p);
+      let dir: Vector3;
+      if (idx < path.length - 1) {
+        dir = path[idx + 1].subtract(p).normalize();
+      } else {
+        dir = p.subtract(path[idx - 1]).normalize();
+      }
+      const perp = new Vector3(-dir.z, 0, dir.x);
+      return new Vector3(
+        p.x - perp.x * (halfWidth - railWidth),
+        p.y + 0.12,
+        p.z - perp.z * (halfWidth - railWidth)
+      );
+    });
+
+    const leftRail = ExtrudeShape(
+      "overpassRailL",
+      { shape: railShape, path: leftRailPath, cap: Mesh.CAP_ALL, updatable: false },
+      this.scene
+    );
+    leftRail.material = railMat;
+    if (this.shadowGen) this.shadowGen.addShadowCaster(leftRail);
+
+    const rightRail = ExtrudeShape(
+      "overpassRailR",
+      { shape: railShape, path: rightRailPath, cap: Mesh.CAP_ALL, updatable: false },
+      this.scene
+    );
+    rightRail.material = railMat;
+    if (this.shadowGen) this.shadowGen.addShadowCaster(rightRail);
   }
 
   private createBridgeMesh(info: BridgeInfo) {

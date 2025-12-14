@@ -90,7 +90,7 @@ export class TrackProps {
     backingMat.metallic = 0.0;
     backingMat.emissiveColor = new Color3(0.15, 0.15, 0.15);
 
-    // Banner material with logo - use backFaceCulling = false for double-sided
+    // Banner material with logo - front face
     const bannerMat = new PBRMaterial("bannerMat", this.scene);
     const logoTexture = new Texture(logoPath, this.scene);
     logoTexture.hasAlpha = true;
@@ -103,10 +103,25 @@ export class TrackProps {
     bannerMat.emissiveColor = new Color3(0.25, 0.25, 0.25);
     bannerMat.emissiveTexture = logoTexture;
     bannerMat.emissiveIntensity = 0.4;
-    bannerMat.backFaceCulling = false;  // Show texture on both sides
-    bannerMat.twoSidedLighting = true;   // Proper lighting on both sides
+    bannerMat.backFaceCulling = true;  // Only show front face
 
-    // Make backing material double-sided too
+    // Separate material for back face with flipped texture
+    const bannerMatBack = new PBRMaterial("bannerMatBack", this.scene);
+    const logoTextureBack = new Texture(logoPath, this.scene);
+    logoTextureBack.hasAlpha = true;
+    logoTextureBack.uScale = -1;  // Flip horizontally so text reads correctly from back
+    bannerMatBack.albedoTexture = logoTextureBack;
+    bannerMatBack.albedoColor = new Color3(1, 1, 1);
+    bannerMatBack.roughness = 0.2;
+    bannerMatBack.metallic = 0.0;
+    bannerMatBack.useAlphaFromAlbedoTexture = true;
+    bannerMatBack.transparencyMode = PBRMaterial.MATERIAL_ALPHABLEND;
+    bannerMatBack.emissiveColor = new Color3(0.25, 0.25, 0.25);
+    bannerMatBack.emissiveTexture = logoTextureBack;
+    bannerMatBack.emissiveIntensity = 0.4;
+    bannerMatBack.backFaceCulling = true;  // Only show front face
+
+    // Make backing material double-sided
     backingMat.backFaceCulling = false;
     backingMat.twoSidedLighting = true;
 
@@ -121,19 +136,31 @@ export class TrackProps {
     backing.rotation.y = faceRotation;
     backing.material = backingMat;
 
-    // Use a thin box for banner (no z-fighting) - slightly in front of backing
-    const banner = CreateBox("banner", {
+    // Create front banner plane
+    const bannerFront = MeshBuilder.CreatePlane("bannerFront", {
       width,
-      height: height * 0.8,
-      depth: 0.02
+      height: height * 0.8
     }, this.scene);
-    banner.position = bannerPos.clone();
-    banner.position.y = bannerY;
-    // Offset banner slightly in front of backing (perpendicular to face)
-    banner.position.x += Math.sin(faceRotation) * 0.04;
-    banner.position.z += Math.cos(faceRotation) * 0.04;
-    banner.rotation.y = faceRotation;
-    banner.material = bannerMat;
+    bannerFront.position = bannerPos.clone();
+    bannerFront.position.y = bannerY;
+    // Offset banner in front of backing
+    bannerFront.position.x += Math.sin(faceRotation) * 0.04;
+    bannerFront.position.z += Math.cos(faceRotation) * 0.04;
+    bannerFront.rotation.y = faceRotation + Math.PI;  // Face outward from backing
+    bannerFront.material = bannerMat;
+
+    // Create back banner plane (rotated 180 degrees so it faces the other way)
+    const bannerBack = MeshBuilder.CreatePlane("bannerBack", {
+      width,
+      height: height * 0.8
+    }, this.scene);
+    bannerBack.position = bannerPos.clone();
+    bannerBack.position.y = bannerY;
+    // Offset banner behind backing
+    bannerBack.position.x -= Math.sin(faceRotation) * 0.04;
+    bannerBack.position.z -= Math.cos(faceRotation) * 0.04;
+    bannerBack.rotation.y = faceRotation;  // Face the opposite direction
+    bannerBack.material = bannerMatBack;
 
     // Add a coloured border/frame around the banner
     const frameMat = new PBRMaterial("frameMat", this.scene);
