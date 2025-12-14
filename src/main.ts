@@ -25,7 +25,7 @@ function createLoadingScreen(container: HTMLElement) {
   loadingDiv.className = "loading-screen";
   loadingDiv.innerHTML = `
     <div class="loading-content">
-      <h1 class="loading-title">APEX//WEB</h1>
+      <h1 class="loading-title">Opace Racer</h1>
       <div class="loading-bar-container">
         <div class="loading-bar" id="loading-bar"></div>
       </div>
@@ -62,7 +62,7 @@ async function boot() {
   loading.update(0, "Initialising engine...");
 
   const canvas = document.createElement("canvas");
-  canvas.setAttribute("aria-label", "APEX//WEB canvas");
+  canvas.setAttribute("aria-label", "Opace Racer canvas");
   root.appendChild(canvas);
   canvas.addEventListener("pointerdown", () => canvas.focus());
 

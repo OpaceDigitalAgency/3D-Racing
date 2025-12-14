@@ -98,8 +98,21 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     quality = preset.id;
     // Babylon's `hardwareScalingLevel` is the inverse of pixel ratio: lower = sharper (more pixels).
     // Scale relative to devicePixelRatio so "Ultra" isn't unintentionally low-res on Retina/high-DPI.
-    const devicePixelRatio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    const hardwareScalingLevel = 1 / (preset.resolutionScale * devicePixelRatio);
+    const devicePixelRatio = isMobile ? 1 : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    let hardwareScalingLevel = 1 / (preset.resolutionScale * devicePixelRatio);
+
+    // Mobile safety cap: avoid allocating huge render targets on high-res phones.
+    // (Prevents iOS Safari GPU/process crashes while keeping desktop visuals unchanged.)
+    if (isMobile) {
+      const maxPixels = 1_400_000; // ~1536x912 equivalent
+      const cw = Math.max(1, canvas.clientWidth || canvas.width || 1);
+      const ch = Math.max(1, canvas.clientHeight || canvas.height || 1);
+      const estPixels = (cw / hardwareScalingLevel) * (ch / hardwareScalingLevel);
+      if (estPixels > maxPixels) {
+        const minScaling = Math.sqrt((cw * ch) / maxPixels);
+        hardwareScalingLevel = Math.max(hardwareScalingLevel, minScaling);
+      }
+    }
     engine.setHardwareScalingLevel(hardwareScalingLevel);
 
     // Debug logging to verify quality settings
@@ -123,8 +136,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     pipeline.fxaaEnabled = preset.post.fxaa || !taaEnabled;
     pipeline.bloomEnabled = preset.post.bloom;
 
-    pipeline.chromaticAberrationEnabled = preset.id === "high" || preset.id === "ultra";
-    pipeline.grainEnabled = preset.id !== "low";
+    pipeline.chromaticAberrationEnabled = !isMobile && (preset.id === "high" || preset.id === "ultra");
+    pipeline.grainEnabled = !isMobile && preset.id !== "low";
 
     if (ssr) ssr.isEnabled = preset.post.ssr;
     if (motionBlur) {

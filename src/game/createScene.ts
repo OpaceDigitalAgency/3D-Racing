@@ -56,6 +56,7 @@ export type SceneBits = {
 };
 
 export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElement): Promise<SceneBits> {
+  const isMobile = isMobileDevice();
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.45, 0.65, 0.85, 1); // Sky blue fallback
 
@@ -93,13 +94,13 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   sun.specular = new Color3(1.0, 0.98, 0.9);
 
   // High quality shadows
-  const shadowGen = new ShadowGenerator(4096, sun);
+  const shadowGen = new ShadowGenerator(isMobile ? 1024 : 4096, sun);
   shadowGen.useBlurExponentialShadowMap = true;
-  shadowGen.blurKernel = 48;
+  shadowGen.blurKernel = isMobile ? 12 : 48;
   shadowGen.bias = 0.00003;
   shadowGen.normalBias = 0.012;
   shadowGen.darkness = 0.3;
-  shadowGen.useContactHardeningShadow = true;
+  shadowGen.useContactHardeningShadow = !isMobile;
   shadowGen.contactHardeningLightSizeUVRatio = 0.05;
 
   // HDR environment for realistic reflections
@@ -152,32 +153,34 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   scene.imageProcessingConfiguration.vignetteColor = new Color4(0, 0, 0, 0);
   scene.imageProcessingConfiguration.vignetteCameraFov = 0.4;
 
-  // Optional pipelines (created early to preserve correct post-process ordering)
+  // Optional pipelines (keep desktop visuals; avoid heavy allocations on mobile)
   let taa: TAARenderingPipeline | null = null;
-  try {
-    taa = new TAARenderingPipeline("taa", scene, [camera]);
-    taa.samples = 8;
-    taa.factor = 0.08;
-    taa.disableOnCameraMove = true;
-    taa.isEnabled = false;
-  } catch (e) {
-    console.warn("TAA pipeline init failed; continuing without it.", e);
-    taa = null;
+  if (!isMobile) {
+    try {
+      taa = new TAARenderingPipeline("taa", scene, [camera]);
+      taa.samples = 8;
+      taa.factor = 0.08;
+      taa.disableOnCameraMove = true;
+      taa.isEnabled = false;
+    } catch (e) {
+      console.warn("TAA pipeline init failed; continuing without it.", e);
+      taa = null;
+    }
   }
 
   // High quality post-processing pipeline
   const pipeline = new DefaultRenderingPipeline("pipe", true, scene, [camera]);
-  pipeline.samples = 8;
+  pipeline.samples = isMobile ? 1 : 8;
   pipeline.fxaaEnabled = true;
   pipeline.bloomEnabled = true;
   pipeline.bloomWeight = 0.2;
   pipeline.bloomThreshold = 0.7;
-  pipeline.bloomKernel = 96;
+  pipeline.bloomKernel = isMobile ? 64 : 96;
   pipeline.bloomScale = 0.6;
-  pipeline.chromaticAberrationEnabled = true;
+  pipeline.chromaticAberrationEnabled = !isMobile;
   pipeline.chromaticAberration.aberrationAmount = 3.5;
   pipeline.chromaticAberration.radialIntensity = 0.6;
-  pipeline.grainEnabled = true;
+  pipeline.grainEnabled = !isMobile;
   pipeline.grain.intensity = 1.4;
   pipeline.grain.animated = true;
   pipeline.sharpenEnabled = true;
@@ -187,45 +190,51 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   pipeline.imageProcessingEnabled = true;
 
   let ssao2: SSAO2RenderingPipeline | null = null;
-  try {
-    ssao2 = new SSAO2RenderingPipeline("ssao2", scene, { ssaoRatio: 0.6, blurRatio: 1.0 }, [camera]);
-    ssao2.radius = 2.2;
-    ssao2.totalStrength = 0.9;
-    ssao2.samples = 8;
-    scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline("ssao2", camera);
-  } catch (e) {
-    console.warn("SSAO2 pipeline init failed; continuing without it.", e);
-    ssao2 = null;
+  if (!isMobile) {
+    try {
+      ssao2 = new SSAO2RenderingPipeline("ssao2", scene, { ssaoRatio: 0.6, blurRatio: 1.0 }, [camera]);
+      ssao2.radius = 2.2;
+      ssao2.totalStrength = 0.9;
+      ssao2.samples = 8;
+      scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline("ssao2", camera);
+    } catch (e) {
+      console.warn("SSAO2 pipeline init failed; continuing without it.", e);
+      ssao2 = null;
+    }
   }
 
   let ssr: SSRRenderingPipeline | null = null;
-  try {
-    ssr = new SSRRenderingPipeline("ssr", scene, [camera], false);
-    ssr.strength = 0.8;
-    ssr.maxSteps = 80;
-    ssr.step = 1;
-    ssr.blurDispersionStrength = 0.0;
-    ssr.roughnessFactor = 0.15;
-    ssr.isEnabled = false;
-  } catch (e) {
-    console.warn("SSR pipeline init failed; continuing without it.", e);
-    ssr = null;
+  if (!isMobile) {
+    try {
+      ssr = new SSRRenderingPipeline("ssr", scene, [camera], false);
+      ssr.strength = 0.8;
+      ssr.maxSteps = 80;
+      ssr.step = 1;
+      ssr.blurDispersionStrength = 0.0;
+      ssr.roughnessFactor = 0.15;
+      ssr.isEnabled = false;
+    } catch (e) {
+      console.warn("SSR pipeline init failed; continuing without it.", e);
+      ssr = null;
+    }
   }
 
   let motionBlur: MotionBlurPostProcess | null = null;
-  try {
-    motionBlur = new MotionBlurPostProcess("motionBlur", scene, 1.0, camera);
-    motionBlur.motionStrength = 0.0;
-    motionBlur.motionBlurSamples = 24;
-    motionBlur.isObjectBased = false;
+  if (!isMobile) {
     try {
-      camera.detachPostProcess(motionBlur);
-    } catch {
-      // ignore
+      motionBlur = new MotionBlurPostProcess("motionBlur", scene, 1.0, camera);
+      motionBlur.motionStrength = 0.0;
+      motionBlur.motionBlurSamples = 24;
+      motionBlur.isObjectBased = false;
+      try {
+        camera.detachPostProcess(motionBlur);
+      } catch {
+        // ignore
+      }
+    } catch (e) {
+      console.warn("Motion blur init failed; continuing without it.", e);
+      motionBlur = null;
     }
-  } catch (e) {
-    console.warn("Motion blur init failed; continuing without it.", e);
-    motionBlur = null;
   }
 
   // Create track with improved materials and get ground mesh
@@ -290,7 +299,6 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   props.addCarDecal(carMesh, '/logos/New-Opace-Logo---High-Quality new.png');
 
   // Mobile-specific memory optimizations
-  const isMobile = isMobileDevice();
   if (isMobile) {
     // Clean up texture cache to free memory
     scene.cleanCachedTextureBuffer();

@@ -18,6 +18,7 @@ export function attachTouchControls(
 ): () => void {
   const activeTouches = new Map<number, { startX: number; startY: number; currentX: number; currentY: number }>();
   const activePointers = new Map<number, { clientX: number; clientY: number }>();
+  const usePointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
   
   // Zone-based controls: left/right halves for steering, top/bottom for throttle/brake
   const processZoneTouch = (touch: Touch) => {
@@ -178,10 +179,14 @@ export function attachTouchControls(
     }
   };
 
-  canvas.addEventListener("touchstart", onTouchStart, { passive: false });
-  canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-  canvas.addEventListener("touchend", onTouchEnd, { passive: false });
-  canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
+  // Prefer Pointer Events when available (iOS Safari can be unreliable with Touch Events for canvas input)
+  // to ensure touch controls work consistently across modern mobile browsers.
+  if (!usePointerEvents) {
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+    canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
+  }
 
   // Desktop/testing support: allow mouse/pen pointer to act like touch controls when selected.
   const toTouchLike = (clientX: number, clientY: number, identifier: number): Touch =>
@@ -190,11 +195,14 @@ export function attachTouchControls(
   const onPointerDown = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
-    if (e.pointerType === "touch") return; // real touch is handled by touch events above
     if (e.pointerType === "mouse" && e.button !== 0) return;
 
     e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
 
     activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
@@ -212,7 +220,6 @@ export function attachTouchControls(
   const onPointerMove = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
-    if (e.pointerType === "touch") return;
     if (!activePointers.has(e.pointerId)) return;
 
     e.preventDefault();
@@ -234,7 +241,6 @@ export function attachTouchControls(
   const onPointerUpOrCancel = (e: PointerEvent) => {
     const mode = getControlMode();
     if (mode === "off") return;
-    if (e.pointerType === "touch") return;
 
     e.preventDefault();
     activePointers.delete(e.pointerId);
@@ -268,10 +274,12 @@ export function attachTouchControls(
   canvas.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
 
   return () => {
-    canvas.removeEventListener("touchstart", onTouchStart);
-    canvas.removeEventListener("touchmove", onTouchMove);
-    canvas.removeEventListener("touchend", onTouchEnd);
-    canvas.removeEventListener("touchcancel", onTouchEnd);
+    if (!usePointerEvents) {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
+    }
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerup", onPointerUpOrCancel);

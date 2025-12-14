@@ -9,7 +9,9 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<CreatedEn
   const isMobile = isMobileDevice();
 
   const webgpuSupported = await WebGPUEngine.IsSupportedAsync;
-  if (webgpuSupported) {
+  // Mobile Safari WebGPU is still unstable on some devices and can crash the browser under load.
+  // Keep WebGPU for desktop only; mobile uses WebGL2 with a mobile-friendly render scale.
+  if (!isMobile && webgpuSupported) {
     try {
       const engine = new WebGPUEngine(canvas, {
         antialias: true,

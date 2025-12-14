@@ -10,6 +10,7 @@ import { Plane } from "@babylonjs/core/Maths/math.plane";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import type { Track } from "./track/Track";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { isMobileDevice } from "../shared/qualityPresets";
 
 // Puddle position data for collision detection
 export type PuddleInfo = {
@@ -161,6 +162,7 @@ function createWaterNormalTexture(scene: Scene, size: number = 512): Texture {
 
 export function createWater(scene: Scene, track: Track): Mesh[] {
   const waterPuddles: Mesh[] = [];
+  const isMobile = isMobileDevice();
   
   // Create water material with reflections
   const waterMat = new PBRMaterial("waterMat", scene);
@@ -185,20 +187,26 @@ export function createWater(scene: Scene, track: Track): Mesh[] {
   waterMat.invertNormalMapX = true;
   waterMat.invertNormalMapY = true;
   
-  // Create reflection texture
-  const mirrorTexture = new MirrorTexture("waterMirror", 1024, scene, true);
-  mirrorTexture.mirrorPlane = new Plane(0, -1, 0, 0.12);
-  mirrorTexture.level = 0.6;
-  mirrorTexture.adaptiveBlurKernel = 16;
-  
-  // Add all meshes to reflection (except water itself)
-  scene.meshes.forEach(mesh => {
-    if (mesh.name !== "water" && !mesh.name.startsWith("waterPuddle")) {
-      mirrorTexture.renderList?.push(mesh);
-    }
-  });
-  
-  waterMat.reflectionTexture = mirrorTexture;
+  // Planar reflections are extremely expensive on mobile (can crash iOS Safari).
+  // Keep the reflections "look" via the scene environment texture on phones, and
+  // enable higher-quality planar mirror reflections on desktop.
+  if (!isMobile) {
+    const mirrorTexture = new MirrorTexture("waterMirror", 1024, scene, true);
+    mirrorTexture.mirrorPlane = new Plane(0, -1, 0, 0.12);
+    mirrorTexture.level = 0.6;
+    mirrorTexture.adaptiveBlurKernel = 16;
+
+    // Add all meshes to reflection (except water itself)
+    scene.meshes.forEach(mesh => {
+      if (mesh.name !== "water" && !mesh.name.startsWith("waterPuddle")) {
+        mirrorTexture.renderList?.push(mesh);
+      }
+    });
+
+    waterMat.reflectionTexture = mirrorTexture;
+  } else {
+    waterMat.environmentIntensity = 1.6;
+  }
   
   // Create water puddles along the track using shared positions
   PUDDLE_POSITIONS.forEach((pos, i) => {

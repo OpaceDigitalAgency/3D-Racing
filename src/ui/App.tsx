@@ -10,6 +10,15 @@ function fmtTime(s: number) {
   return `${m}:${r.toFixed(2).padStart(5, "0")}`;
 }
 
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function dialDeg(value: number, min: number, max: number) {
+  const t = clamp((value - min) / (max - min), 0, 1);
+  return -130 + t * 260;
+}
+
 export function App({ game }: { game: GameAPI }) {
   const [t, setT] = useState<TelemetrySnapshot>(() => game.getTelemetry());
   const [quality, setQuality] = useState<QualityPresetId>(t.quality);
@@ -22,6 +31,13 @@ export function App({ game }: { game: GameAPI }) {
 
   const presets = useMemo(() => QUALITY_PRESETS, []);
   const isMobile = t.isMobile;
+  const speedKph = Math.round(t.speedKph);
+  const speedNeedleDeg = dialDeg(speedKph, 0, 260);
+  const throttlePct = Math.round(clamp(t.input.throttle, 0, 1) * 100);
+  const brakePct = Math.round(clamp(t.input.brake, 0, 1) * 100);
+  const driveNeedleDeg = dialDeg(throttlePct, 0, 100);
+  const speedDialStyle = { ["--needle-deg" as any]: `${speedNeedleDeg}deg` } as React.CSSProperties;
+  const driveDialStyle = { ["--needle-deg" as any]: `${driveNeedleDeg}deg` } as React.CSSProperties;
 
   const blurAndRefocusCanvas = (el: HTMLElement | null) => {
     el?.blur?.();
@@ -94,9 +110,9 @@ export function App({ game }: { game: GameAPI }) {
   return (
     <>
       <TouchOverlay mode={touchMode} visible={isMobile || touchMode !== "off"} />
-      <div className={`ui ${isMobile ? 'ui--mobile' : ''}`}>
+      <div className={`ui ui--cockpit ${isMobile ? "ui--mobile" : ""}`}>
         <div className="ui__header">
-          <h1>APEX//WEB</h1>
+          <h1>Opace Racer</h1>
           {isMobile && (
             <button
               className="ui__close-btn"
@@ -108,53 +124,69 @@ export function App({ game }: { game: GameAPI }) {
           )}
         </div>
 
-      {/* Debug info - hide on mobile */}
-      {!isMobile && (
-        <>
-          <div className="row">
-            <span><b>Renderer</b></span>
-            <span>{t.renderer.toUpperCase()}</span>
+        <div className="cockpit__cluster" aria-label="Diagnostics cockpit">
+          <div className="dial dial--speed" style={speedDialStyle} aria-label={`Speed ${speedKph} km/h`}>
+            <div className="dial__needle" />
+            <div className="dial__cap" />
+            <div className="dial__readout">
+              <div className="dial__value">{speedKph}</div>
+              <div className="dial__unit">km/h</div>
+            </div>
+            <div className="dial__label">SPEED</div>
           </div>
-          <div className="row">
-            <span><b>FPS</b></span>
-            <span>{t.fps}</span>
-          </div>
-        </>
-      )}
 
-      <div className="row">
-        <span><b>Speed</b></span>
-        <span>{Math.round(t.speedKph)} km/h</span>
-      </div>
-
-      {/* Hide input/focus debug on mobile */}
-      {!isMobile && (
-        <>
-          <div className="row">
-            <span><b>Input</b></span>
-            <span>
-              T{t.input.throttle.toFixed(1)} B{t.input.brake.toFixed(1)} S{t.input.steer.toFixed(1)} H{t.input.handbrake.toFixed(1)}
-            </span>
+          <div className="dial dial--drive" style={driveDialStyle} aria-label={`Throttle ${throttlePct}%`}>
+            <div className="dial__needle dial__needle--accent" />
+            <div className="dial__cap" />
+            <div className="dial__readout">
+              <div className="dial__value">
+                {throttlePct}<span className="dial__subunit">%</span>
+              </div>
+              <div className="dial__unit">THROTTLE</div>
+            </div>
+            <div className="dial__label">BRAKE {brakePct}%</div>
           </div>
-          <div className="row">
-            <span><b>Focus</b></span>
-            <span>{t.focus.hasDocumentFocus ? "yes" : "no"} / {t.focus.activeElementTag}</span>
-          </div>
-        </>
-      )}
 
-      <div className="row">
-        <span><b>Lap</b></span>
-        <span>{fmtTime(t.lapTimeSeconds)}</span>
-      </div>
-      <div className="row">
-        <span><b>Best</b></span>
-        <span>{t.bestLapSeconds == null ? "—" : fmtTime(t.bestLapSeconds)}</span>
-      </div>
-      <div className="row">
-        <span><b>Laps</b></span>
-        <span>{t.laps}</span>
-      </div>
+          <div className="mfd" role="group" aria-label="Telemetry display">
+            <div className="mfd__title">TELEMETRY</div>
+            <div className="mfd__grid">
+              <div className="mfd__row">
+                <span>LAP</span>
+                <span>{fmtTime(t.lapTimeSeconds)}</span>
+              </div>
+              <div className="mfd__row">
+                <span>BEST</span>
+                <span>{t.bestLapSeconds == null ? "—" : fmtTime(t.bestLapSeconds)}</span>
+              </div>
+              <div className="mfd__row">
+                <span>LAPS</span>
+                <span>{t.laps}</span>
+              </div>
+              {!isMobile && (
+                <>
+                  <div className="mfd__row">
+                    <span>FPS</span>
+                    <span>{t.fps}</span>
+                  </div>
+                  <div className="mfd__row">
+                    <span>GPU</span>
+                    <span>{t.renderer.toUpperCase()}</span>
+                  </div>
+                  <div className="mfd__row mfd__row--mono">
+                    <span>IN</span>
+                    <span>
+                      T{t.input.throttle.toFixed(1)} B{t.input.brake.toFixed(1)} S{t.input.steer.toFixed(1)} H{t.input.handbrake.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="mfd__row mfd__row--mono">
+                    <span>FOCUS</span>
+                    <span>{t.focus.hasDocumentFocus ? "yes" : "no"} / {t.focus.activeElementTag}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
 
       <div className="controls">
         <label>
@@ -273,7 +305,7 @@ export function App({ game }: { game: GameAPI }) {
       )}
 
       {/* Hints - different for mobile vs desktop */}
-      <div className="hint">
+      <div className="hint cockpit__hint">
         {!isMobile && (
           <>
             <div>

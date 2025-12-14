@@ -28,7 +28,8 @@ export const QUALITY_PRESETS: readonly QualityPreset[] = [
     label: "Mobile Optimised",
     resolutionScale: 0.65,
     shadows: { enabled: true, mapSize: 512, blurKernel: 8 },
-    post: { bloom: true, fxaa: true, taa: false, ssao: false, ssr: true, motionBlur: false }
+    // Keep the "nice" look (PBR environment reflections + bloom), but avoid heavy post effects on phones.
+    post: { bloom: true, fxaa: true, taa: false, ssao: false, ssr: false, motionBlur: false }
   },
   {
     id: "medium",
