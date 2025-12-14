@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { GameAPI } from "../game/Game";
 import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
 import { CAMERA_VIEWS, TOUCH_CONTROL_MODES, type CameraViewId, type TelemetrySnapshot, type TouchControlMode } from "../shared/telemetry";
+import { TouchOverlay } from "./TouchOverlay";
 
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
@@ -18,6 +19,12 @@ export function App({ game }: { game: GameAPI }) {
   const [zoom, setZoom] = useState<number>(t.zoomLevel);
 
   const presets = useMemo(() => QUALITY_PRESETS, []);
+
+  const blurAndRefocusCanvas = (el: HTMLElement | null) => {
+    el?.blur?.();
+    const canvas = document.querySelector("#root canvas") as HTMLCanvasElement | null;
+    canvas?.focus?.();
+  };
 
   useEffect(() => {
     const id = window.setInterval(() => setT(game.getTelemetry()), 66);
@@ -45,8 +52,10 @@ export function App({ game }: { game: GameAPI }) {
   }, [game, zoom]);
 
   return (
-    <div className="ui">
-      <h1>APEX//WEB</h1>
+    <>
+      <TouchOverlay mode={touchMode} visible={t.isMobile || touchMode !== "off"} />
+      <div className="ui">
+        <h1>APEX//WEB</h1>
 
       <div className="row">
         <span>
@@ -104,7 +113,13 @@ export function App({ game }: { game: GameAPI }) {
       <div className="controls">
         <label>
           Quality
-          <select value={quality} onChange={(e) => setQuality(e.target.value as QualityPresetId)}>
+          <select
+            value={quality}
+            onChange={(e) => {
+              setQuality(e.target.value as QualityPresetId);
+              blurAndRefocusCanvas(e.currentTarget);
+            }}
+          >
             {presets.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
@@ -114,7 +129,13 @@ export function App({ game }: { game: GameAPI }) {
         </label>
         <label>
           Camera
-          <select value={cameraView} onChange={(e) => setCameraView(e.target.value as CameraViewId)}>
+          <select
+            value={cameraView}
+            onChange={(e) => {
+              setCameraView(e.target.value as CameraViewId);
+              blurAndRefocusCanvas(e.currentTarget);
+            }}
+          >
             {CAMERA_VIEWS.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
@@ -128,7 +149,13 @@ export function App({ game }: { game: GameAPI }) {
       <div className="controls">
         <label>
           Touch Controls
-          <select value={touchMode} onChange={(e) => setTouchMode(e.target.value as TouchControlMode)}>
+          <select
+            value={touchMode}
+            onChange={(e) => {
+              setTouchMode(e.target.value as TouchControlMode);
+              blurAndRefocusCanvas(e.currentTarget);
+            }}
+          >
             {TOUCH_CONTROL_MODES.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
@@ -177,6 +204,7 @@ export function App({ game }: { game: GameAPI }) {
         )}
         <div style={{ marginTop: 6 }}>Tip: Lower sensitivity for smoother steering. WebGPU + High/Ultra looks best.</div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

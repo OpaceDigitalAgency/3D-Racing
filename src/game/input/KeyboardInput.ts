@@ -6,7 +6,8 @@ export function attachKeyboard(input: InputState, canvas: HTMLCanvasElement) {
   const isTypingTarget = (t: EventTarget | null) => {
     if (!(t instanceof HTMLElement)) return false;
     const tag = t.tagName.toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    // Allow gameplay keys even when a <select> remains focused after a UI change.
+    if (tag === "input" || tag === "textarea") return true;
     return t.isContentEditable;
   };
 

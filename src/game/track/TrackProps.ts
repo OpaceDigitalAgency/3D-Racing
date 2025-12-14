@@ -90,7 +90,7 @@ export class TrackProps {
     backingMat.metallic = 0.0;
     backingMat.emissiveColor = new Color3(0.15, 0.15, 0.15);
 
-    // Banner material with logo
+    // Banner material with logo - use backFaceCulling = false for double-sided
     const bannerMat = new PBRMaterial("bannerMat", this.scene);
     const logoTexture = new Texture(logoPath, this.scene);
     logoTexture.hasAlpha = true;
@@ -103,50 +103,37 @@ export class TrackProps {
     bannerMat.emissiveColor = new Color3(0.25, 0.25, 0.25);
     bannerMat.emissiveTexture = logoTexture;
     bannerMat.emissiveIntensity = 0.4;
+    bannerMat.backFaceCulling = false;  // Show texture on both sides
+    bannerMat.twoSidedLighting = true;   // Proper lighting on both sides
 
-    // Offset for front/back separation
-    const frontOffset = 0.05;
-    const backOffset = -0.05;
+    // Make backing material double-sided too
+    backingMat.backFaceCulling = false;
+    backingMat.twoSidedLighting = true;
 
-    // Calculate offset vectors based on rotation
-    const frontOffsetX = Math.sin(faceRotation) * frontOffset;
-    const frontOffsetZ = Math.cos(faceRotation) * frontOffset;
-    const backOffsetX = Math.sin(faceRotation) * backOffset;
-    const backOffsetZ = Math.cos(faceRotation) * backOffset;
+    // Use a thin box for backing (no z-fighting) - shows on both sides
+    const backing = CreateBox("bannerBacking", {
+      width: backingWidth,
+      height: backingHeight,
+      depth: 0.05
+    }, this.scene);
+    backing.position = bannerPos.clone();
+    backing.position.y = bannerY;
+    backing.rotation.y = faceRotation;
+    backing.material = backingMat;
 
-    // FRONT SIDE - facing the track (visible when driving past)
-    const frontBacking = MeshBuilder.CreatePlane("bannerBackingFront", { width: backingWidth, height: backingHeight }, this.scene);
-    frontBacking.position = bannerPos.clone();
-    frontBacking.position.y = bannerY;
-    frontBacking.position.x += frontOffsetX - Math.sin(faceRotation) * 0.03;
-    frontBacking.position.z += frontOffsetZ - Math.cos(faceRotation) * 0.03;
-    frontBacking.rotation.y = faceRotation;
-    frontBacking.material = backingMat;
-
-    const frontBanner = MeshBuilder.CreatePlane("bannerFront", { width, height: height * 0.8 }, this.scene);
-    frontBanner.position = bannerPos.clone();
-    frontBanner.position.y = bannerY;
-    frontBanner.position.x += frontOffsetX;
-    frontBanner.position.z += frontOffsetZ;
-    frontBanner.rotation.y = faceRotation;
-    frontBanner.material = bannerMat;
-
-    // BACK SIDE - facing away from track (visible from other side)
-    const backBacking = MeshBuilder.CreatePlane("bannerBackingBack", { width: backingWidth, height: backingHeight }, this.scene);
-    backBacking.position = bannerPos.clone();
-    backBacking.position.y = bannerY;
-    backBacking.position.x += backOffsetX + Math.sin(faceRotation) * 0.03;
-    backBacking.position.z += backOffsetZ + Math.cos(faceRotation) * 0.03;
-    backBacking.rotation.y = faceRotation + Math.PI;  // Rotated 180 degrees
-    backBacking.material = backingMat;
-
-    const backBanner = MeshBuilder.CreatePlane("bannerBack", { width, height: height * 0.8 }, this.scene);
-    backBanner.position = bannerPos.clone();
-    backBanner.position.y = bannerY;
-    backBanner.position.x += backOffsetX;
-    backBanner.position.z += backOffsetZ;
-    backBanner.rotation.y = faceRotation + Math.PI;  // Rotated 180 degrees
-    backBanner.material = bannerMat;
+    // Use a thin box for banner (no z-fighting) - slightly in front of backing
+    const banner = CreateBox("banner", {
+      width,
+      height: height * 0.8,
+      depth: 0.02
+    }, this.scene);
+    banner.position = bannerPos.clone();
+    banner.position.y = bannerY;
+    // Offset banner slightly in front of backing (perpendicular to face)
+    banner.position.x += Math.sin(faceRotation) * 0.04;
+    banner.position.z += Math.cos(faceRotation) * 0.04;
+    banner.rotation.y = faceRotation;
+    banner.material = bannerMat;
 
     // Add a coloured border/frame around the banner
     const frameMat = new PBRMaterial("frameMat", this.scene);

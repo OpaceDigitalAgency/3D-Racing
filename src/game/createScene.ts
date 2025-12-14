@@ -74,6 +74,9 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   camera.fov = 0.9;
   camera.wheelPrecision = 15;
   camera.pinchPrecision = 50;
+  // First-person/close cameras need a near clip plane well under 1m, otherwise the hood/bumper get clipped away.
+  camera.minZ = 0.05;
+  camera.maxZ = 5000;
 
   // Enhanced lighting for photorealistic look
   const hemi = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
@@ -236,13 +239,11 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   speedPads.addPadOnTrack(0.52, 6, 10);   // Mid opposite straight
   speedPads.addPadOnTrack(0.78, 6, 10);   // Before final corner
 
-  // Create bridge/overpass that crosses the infield
-  // The track is a rounded rectangle with halfX=95, halfZ=70, halfWidth=8
-  // Bridge spans across the grass from left straight (x=-95) to right straight (x=95) at z=0
-  // The ramps (length = height * 4) will connect the bridge deck to the track surface
+  // Create bridge/overpass as an optional route on the right straight.
+  // Aligned with the travel direction so it's easy to drive onto (choose ramp up vs stay on the road).
   const bridges = new BridgeSystem(scene, shadowGen);
-  // Overpass crossing the infield - ramps start on each side of the track
-  bridges.addBridge(-83, 0, 83, 0, 10, 3);
+  // Right straight centerline is around x=95; keep z range away from corners for clean entry/exit.
+  bridges.addBridge(95, -20, 95, 20, 10, 3);
 
   // Add sponsor banners and props around the track
   const props = new TrackProps(scene, track, shadowGen);

@@ -120,3 +120,127 @@ canvas {
   color: rgba(255, 255, 255, 0.86);
 }
 
+.touch-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.touch-overlay * {
+  pointer-events: none;
+}
+
+/* Zone mode overlay */
+.touch-zones {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 40% 30% 30%;
+}
+
+.touch-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 11px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.45);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.touch-zone--steerL {
+  grid-column: 1;
+  grid-row: 1 / 4;
+  justify-content: flex-start;
+  padding-left: 16px;
+  border-right: none;
+}
+
+.touch-zone--steerR {
+  grid-column: 2;
+  grid-row: 1 / 4;
+  justify-content: flex-end;
+  padding-right: 16px;
+}
+
+.touch-zone--throttle {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  align-items: flex-start;
+  padding-top: 16px;
+  border-bottom: none;
+  background: rgba(103, 209, 255, 0.06);
+}
+
+.touch-zone--brake {
+  grid-column: 1 / 3;
+  grid-row: 3;
+  align-items: flex-end;
+  padding-bottom: 16px;
+  border-top: none;
+  background: rgba(255, 89, 103, 0.05);
+}
+
+/* D-pad mode overlay */
+.touch-dpad {
+  position: absolute;
+  left: 5vw;
+  bottom: 7vh;
+  width: min(26vmin, 170px);
+  height: min(26vmin, 170px);
+  display: grid;
+  place-items: center;
+}
+
+.touch-dpad__ring {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.06));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.touch-dpad__label {
+  position: absolute;
+  bottom: -18px;
+  font: 700 10px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.touch-buttons {
+  position: absolute;
+  right: 5vw;
+  bottom: 7vh;
+  display: grid;
+  gap: 12px;
+}
+
+.touch-btn {
+  width: min(18vmin, 120px);
+  height: min(18vmin, 120px);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.9px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.touch-btn--throttle {
+  border-color: rgba(103, 209, 255, 0.22);
+  background: rgba(103, 209, 255, 0.06);
+}
+
+.touch-btn--brake {
+  border-color: rgba(255, 89, 103, 0.2);
+  background: rgba(255, 89, 103, 0.05);
+}

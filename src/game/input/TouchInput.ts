@@ -17,6 +17,7 @@ export function attachTouchControls(
   getControlMode: () => TouchControlMode
 ): () => void {
   const activeTouches = new Map<number, { startX: number; startY: number; currentX: number; currentY: number }>();
+  const activePointers = new Map<number, { clientX: number; clientY: number }>();
   
   // Zone-based controls: left/right halves for steering, top/bottom for throttle/brake
   const processZoneTouch = (touch: Touch) => {
@@ -104,12 +105,16 @@ export function attachTouchControls(
         currentX: touch.clientX,
         currentY: touch.clientY
       });
-      
-      if (mode === "zones") {
-        processZoneTouch(touch);
-      } else if (mode === "dpad") {
-        processDpadTouch(touch);
-      }
+    }
+
+    // Recompute inputs from all active touches (prevents "sticky" steer if a new touch starts in neutral zones).
+    input.steer = 0;
+    input.throttle = 0;
+    input.brake = 0;
+    for (let i = 0; i < e.touches.length; i++) {
+      const touch = e.touches[i];
+      if (mode === "zones") processZoneTouch(touch);
+      else if (mode === "dpad") processDpadTouch(touch);
     }
   };
 
@@ -178,11 +183,98 @@ export function attachTouchControls(
   canvas.addEventListener("touchend", onTouchEnd, { passive: false });
   canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
+  // Desktop/testing support: allow mouse/pen pointer to act like touch controls when selected.
+  const toTouchLike = (clientX: number, clientY: number, identifier: number): Touch =>
+    ({ identifier, clientX, clientY } as Touch);
+
+  const onPointerDown = (e: PointerEvent) => {
+    const mode = getControlMode();
+    if (mode === "off") return;
+    if (e.pointerType === "touch") return; // real touch is handled by touch events above
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+
+    activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+    // Recompute from all active pointers (mirrors touchstart behaviour).
+    input.steer = 0;
+    input.throttle = 0;
+    input.brake = 0;
+    activePointers.forEach((p, id) => {
+      const t = toTouchLike(p.clientX, p.clientY, id);
+      if (mode === "zones") processZoneTouch(t);
+      else if (mode === "dpad") processDpadTouch(t);
+    });
+  };
+
+  const onPointerMove = (e: PointerEvent) => {
+    const mode = getControlMode();
+    if (mode === "off") return;
+    if (e.pointerType === "touch") return;
+    if (!activePointers.has(e.pointerId)) return;
+
+    e.preventDefault();
+
+    activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+    // Reset inputs before processing moves
+    input.steer = 0;
+    input.throttle = 0;
+    input.brake = 0;
+
+    activePointers.forEach((p, id) => {
+      const t = toTouchLike(p.clientX, p.clientY, id);
+      if (mode === "zones") processZoneTouch(t);
+      else if (mode === "dpad") processDpadTouch(t);
+    });
+  };
+
+  const onPointerUpOrCancel = (e: PointerEvent) => {
+    const mode = getControlMode();
+    if (mode === "off") return;
+    if (e.pointerType === "touch") return;
+
+    e.preventDefault();
+    activePointers.delete(e.pointerId);
+    try {
+      canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
+    if (activePointers.size === 0) {
+      input.steer = 0;
+      input.throttle = 0;
+      input.brake = 0;
+      return;
+    }
+
+    // Reprocess remaining pointers
+    input.steer = 0;
+    input.throttle = 0;
+    input.brake = 0;
+    activePointers.forEach((p, id) => {
+      const t = toTouchLike(p.clientX, p.clientY, id);
+      if (mode === "zones") processZoneTouch(t);
+      else if (mode === "dpad") processDpadTouch(t);
+    });
+  };
+
+  canvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+  canvas.addEventListener("pointermove", onPointerMove, { passive: false });
+  canvas.addEventListener("pointerup", onPointerUpOrCancel, { passive: false });
+  canvas.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
+
   return () => {
     canvas.removeEventListener("touchstart", onTouchStart);
     canvas.removeEventListener("touchmove", onTouchMove);
     canvas.removeEventListener("touchend", onTouchEnd);
     canvas.removeEventListener("touchcancel", onTouchEnd);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUpOrCancel);
+    canvas.removeEventListener("pointercancel", onPointerUpOrCancel);
   };
 }
-

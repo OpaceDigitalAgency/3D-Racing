@@ -34,7 +34,7 @@ async function boot() {
   const isTypingTarget = (t: EventTarget | null) => {
     if (!(t instanceof HTMLElement)) return false;
     const tag = t.tagName.toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (tag === "input" || tag === "textarea") return true;
     return t.isContentEditable;
   };
 

@@ -98,13 +98,15 @@ export class BridgeSystem {
     // Support pillars at deck start/end
     const pillarRadius = 0.5;
     const pillarHeight = height;
+    // Keep pillars out of the driving line when the bridge runs over the road.
+    const pillarOffsetFromCenter = width / 2 + 6;
 
     for (const pos of [start, end]) {
       for (const side of [-1, 1]) {
         const pillar = CreateCylinder("pillar", { height: pillarHeight, diameter: pillarRadius * 2 }, this.scene);
         pillar.position = pos.clone();
-        pillar.position.x += Math.cos(rotation) * (width / 2 - 0.8) * side;
-        pillar.position.z -= Math.sin(rotation) * (width / 2 - 0.8) * side;
+        pillar.position.x += Math.cos(rotation) * pillarOffsetFromCenter * side;
+        pillar.position.z -= Math.sin(rotation) * pillarOffsetFromCenter * side;
         pillar.position.y = pillarHeight / 2;
         pillar.material = steelMat;
         if (this.shadowGen) this.shadowGen.addShadowCaster(pillar);
@@ -263,4 +265,3 @@ export class BridgeSystem {
     return { height: 0, onBridge: false };
   }
 }
-

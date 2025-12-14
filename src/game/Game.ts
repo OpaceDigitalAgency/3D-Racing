@@ -86,7 +86,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   let wasInWater = false;
   let speedPadCooldown = 0;  // Prevent instant re-trigger
 
-  let quality: QualityPresetId = "high";
+  let quality: QualityPresetId = "ultra";
   let ssaoAttached = false;
   let motionBlurAttached = false;
   const applyQuality = (id: QualityPresetId) => {
@@ -155,14 +155,41 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
 
   // Camera view system
   let cameraView: CameraViewId = "chase";
+  const orbitConfig = {
+    inertia: camera.inertia,
+    lowerBetaLimit: camera.lowerBetaLimit,
+    upperBetaLimit: camera.upperBetaLimit,
+    lowerRadiusLimit: camera.lowerRadiusLimit,
+    upperRadiusLimit: camera.upperRadiusLimit,
+  };
+  const clearCameraInertia = () => {
+    // Prevent residual pointer inertia from leaking into fixed views.
+    camera.inertialAlphaOffset = 0;
+    camera.inertialBetaOffset = 0;
+    camera.inertialRadiusOffset = 0;
+    camera.inertialPanningX = 0;
+    camera.inertialPanningY = 0;
+  };
   const setCameraView = (id: CameraViewId) => {
     cameraView = id;
-    // Reset camera controls for orbit mode
+    // Orbit mode: user controlled camera.
     if (id === "orbit") {
+      camera.inertia = orbitConfig.inertia;
+      camera.lowerBetaLimit = orbitConfig.lowerBetaLimit;
+      camera.upperBetaLimit = orbitConfig.upperBetaLimit;
+      camera.lowerRadiusLimit = orbitConfig.lowerRadiusLimit;
+      camera.upperRadiusLimit = orbitConfig.upperRadiusLimit;
+      clearCameraInertia();
       camera.attachControl(canvas, true);
-    } else {
-      camera.detachControl();
+      return;
     }
+
+    // Fixed views: lock camera; no residual inertia; no beta clamping near horizontal.
+    camera.detachControl();
+    clearCameraInertia();
+    camera.inertia = 0;
+    camera.lowerBetaLimit = 0.01;
+    camera.upperBetaLimit = Math.PI - 0.01;
   };
 
   // Set initial car position on track
@@ -445,10 +472,13 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       fov: number,
       smooth: boolean = true
     ) => {
-      const dir = lookAt.subtract(camPos);
-      const targetRadius = dir.length();
-      const targetAlpha = Math.atan2(dir.x, dir.z);
-      const targetBeta = Math.acos(dir.y / targetRadius);
+      // Convert desired world-space pose (position + look-at) into ArcRotate alpha/beta/radius.
+      // Babylon's ArcRotate uses alpha = atan2(z, x) and beta = acos(y / r) for offset = position - target.
+      const offset = camPos.subtract(lookAt);
+      const targetRadius = Math.max(0.001, offset.length());
+      const targetAlpha = Math.atan2(offset.z, offset.x);
+      const yOverR = Math.max(-1, Math.min(1, offset.y / targetRadius));
+      const targetBeta = Math.acos(yOverR);
 
       if (smooth) {
         const alphaLerp = 1 - Math.pow(0.00001, dt);
@@ -457,7 +487,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         camera.alpha += normDiff * alphaLerp;
         camera.beta += (targetBeta - camera.beta) * alphaLerp;
         camera.radius += (targetRadius - camera.radius) * alphaLerp;
-        camera.target = Vector3.Lerp(camera.target, lookAt, alphaLerp);
+        Vector3.LerpToRef(camera.target, lookAt, alphaLerp, camera.target);
       } else {
         camera.alpha = targetAlpha;
         camera.beta = targetBeta;
@@ -491,19 +521,20 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
         const bobAmountY = Math.sin(headBobTime) * 0.015 * speedFactor;
         const bobAmountX = Math.cos(headBobTime * 0.5) * 0.008 * speedFactor;
 
-        // Add subtle camera shake based on lateral acceleration (cornering)
-        const lateralShake = Math.abs(sim.accelLatMps2) * 0.003;
-        const shakeX = (Math.random() - 0.5) * lateralShake;
-        const shakeY = (Math.random() - 0.5) * lateralShake * 0.5;
+        // Subtle, *deterministic* camera shake from lateral acceleration (avoid per-frame randomness/jitter).
+        const lateral01 = Math.max(0, Math.min(1, Math.abs(sim.accelLatMps2) / 14));
+        const lateralShake = lateral01 * 0.01;
+        const shakeX = Math.sin(headBobTime * 7.3) * lateralShake;
+        const shakeY = Math.cos(headBobTime * 5.1) * lateralShake * 0.6;
 
         // Driver sits slightly left of centre, behind windscreen
         const driverPos = sim.position
-          .add(forward.scale(-0.1))
-          .add(new Vector3(0, 1.05 + bobAmountY + shakeY, 0))
-          .add(right.scale(-0.3 + bobAmountX + shakeX));
+          .add(forward.scale(0.25))
+          .add(new Vector3(0, 0.92 + bobAmountY + shakeY, 0))
+          .add(right.scale(-0.28 + bobAmountX + shakeX));
 
         // Look ahead with slight steering offset for more realistic feel
-        const steerOffset = input.steer * 2; // Look slightly into turns
+        const steerOffset = input.steer * 1.2; // world-space offset for a small look-into-turns angle
         const lookTarget = driverPos.add(forward.scale(30)).add(right.scale(steerOffset));
 
         // Wider FOV that increases with speed for sense of motion
@@ -514,29 +545,41 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       }
       case "hood": {
         // Hood camera - mounted on bonnet, looking forward over the hood
-        // Position camera lower and further back to see the hood
-        const hoodPos = sim.position.add(forward.scale(0.3)).add(new Vector3(0, 1.1, 0));
-        const hoodTarget = hoodPos.add(forward.scale(40)).add(new Vector3(0, -0.3, 0));
-        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.85);
+        // Position camera low enough to see the bonnet and tilt slightly down.
+        const hoodPos = sim.position.add(forward.scale(0.35)).add(new Vector3(0, 0.9, 0));
+        // Look at a nearer point so the hood stays in the lower frame.
+        const hoodTarget = hoodPos.add(forward.scale(14)).add(new Vector3(0, -0.45, 0));
+        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.82, false);
         // Show only front of car (hood visible, rest hidden would require mesh splitting)
         setCarVisible(true);
         break;
       }
       case "bumper": {
         // Bumper camera - low angle from front of car, seeing bonnet and road ahead
-        const bumperPos = sim.position.add(forward.scale(1.8)).add(new Vector3(0, 0.45, 0));
-        const bumperTarget = bumperPos.add(forward.scale(35)).add(new Vector3(0, 0.2, 0));
-        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.9);
+        // Place slightly behind the very front so some nose/bonnet stays in-frame, with a slight down tilt.
+        const bumperPos = sim.position.add(forward.scale(1.65)).add(new Vector3(0, 0.34, 0));
+        // Look at a nearer point so the car nose remains visible.
+        const bumperTarget = bumperPos.add(forward.scale(14)).add(new Vector3(0, -0.3, 0));
+        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.86, false);
         // Show car - bonnet should be visible from this angle
         setCarVisible(true);
         break;
       }
       case "orbit": {
         // Free orbit camera - user controlled with mouse, respects zoom
-        camera.target = Vector3.Lerp(camera.target, sim.position.add(new Vector3(0, 1, 0)), lerpFactor * 0.5);
-        // Apply zoom to orbit radius limits
-        camera.lowerRadiusLimit = 5 + (1 - zoomLevel) * 100;
-        camera.upperRadiusLimit = 35 + (1 - zoomLevel) * 300;
+        const orbitTarget = sim.position.add(new Vector3(0, 1, 0));
+        // Safety check for valid target position
+        if (isFinite(orbitTarget.x) && isFinite(orbitTarget.y) && isFinite(orbitTarget.z)) {
+          camera.target = Vector3.Lerp(camera.target, orbitTarget, lerpFactor * 0.5);
+        }
+        // Apply zoom to orbit radius limits with sensible bounds
+        const minRadius = Math.max(5, 5 + (1 - zoomLevel) * 50);
+        const maxRadius = Math.max(minRadius + 10, 35 + (1 - zoomLevel) * 150);
+        camera.lowerRadiusLimit = minRadius;
+        camera.upperRadiusLimit = maxRadius;
+        // Clamp actual radius to valid range
+        if (camera.radius < minRadius) camera.radius = minRadius;
+        if (camera.radius > maxRadius) camera.radius = maxRadius;
         camera.fov = 0.9;
         setCarVisible(true);
         break;
