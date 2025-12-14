@@ -96,7 +96,17 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   const applyQuality = (id: QualityPresetId) => {
     const preset = QUALITY_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[2];
     quality = preset.id;
-    engine.setHardwareScalingLevel(1 / preset.resolutionScale);
+    const hardwareScalingLevel = 1 / preset.resolutionScale;
+    engine.setHardwareScalingLevel(hardwareScalingLevel);
+
+    // Debug logging to verify quality settings
+    console.log(`[Quality] Applied: ${preset.id}`, {
+      resolutionScale: preset.resolutionScale,
+      hardwareScalingLevel,
+      shadowMapSize: preset.shadows.mapSize,
+      renderWidth: engine.getRenderWidth(),
+      renderHeight: engine.getRenderHeight()
+    });
 
     // Avoid zero-sized shadow maps (can break WebGPU). Instead, keep a small map and set darkness to 0.
     shadowGen.mapSize = Math.max(256, preset.shadows.mapSize);
