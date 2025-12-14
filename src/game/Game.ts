@@ -8,7 +8,7 @@ import { attachKeyboard } from "./input/KeyboardInput";
 import { attachGamepad } from "./input/GamepadInput";
 import { attachTouchControls, isMobileDevice, type TouchControlMode } from "./input/TouchInput";
 import { CarSim } from "./sim/CarSim";
-import { QUALITY_PRESETS, type QualityPresetId } from "../shared/qualityPresets";
+import { QUALITY_PRESETS, type QualityPresetId, detectOptimalQuality } from "../shared/qualityPresets";
 import { CAMERA_VIEWS, type TelemetrySnapshot, type CameraViewId } from "../shared/telemetry";
 import type { ProjectionRef } from "./track/Track";
 import { DamageSystem, createCrashParticles, triggerCrashEffect, applyVisualDamage, createSmokeParticles } from "./effects/CrashEffects";
@@ -86,9 +86,15 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   let wasInWater = false;
   let speedPadCooldown = 0;  // Prevent instant re-trigger
 
-  let quality: QualityPresetId = "ultra";
+  // Auto-detect optimal quality based on device capabilities
+  let quality: QualityPresetId = detectOptimalQuality();
   let ssaoAttached = false;
   let motionBlurAttached = false;
+
+  // Performance monitoring for auto-adjustment
+  let fpsHistory: number[] = [];
+  let lowFpsFrames = 0;
+  let performanceCheckInterval = 0;
   const applyQuality = (id: QualityPresetId) => {
     const preset = QUALITY_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[2];
     quality = preset.id;
@@ -252,8 +258,8 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       // Get ramp height at current position
       const rampInfo = ramps.getHeightAt(sim.position, sim.yawRad);
 
-      // Get bridge height at current position
-      const bridgeInfo = bridges.getHeightAt(sim.position);
+      // Get bridge height at current position (pass car Y position for collision detection)
+      const bridgeInfo = bridges.getHeightAt(sim.position, sim.position.y);
 
       // Handle side collision with ramp barriers
       if (rampInfo.sideCollision) {
@@ -268,6 +274,26 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
 
         // Bounce off the side
         const bounceNormal = rampInfo.normal;
+        const vn = Vector3.Dot(sim.velocity, bounceNormal);
+        if (vn < 0) {
+          sim.velocity.addInPlace(bounceNormal.scale(-vn * 1.5));
+          sim.velocity.scaleInPlace(0.6);
+        }
+      }
+
+      // Handle side collision with bridge barriers (same behaviour as ramp barriers)
+      if (bridgeInfo.sideCollision) {
+        const impactSpeed = sim.speedMps * 3.6;
+        const damageAmount = Math.max(0, (impactSpeed - 15) * 0.4);
+
+        if (damageAmount > 0) {
+          damageSystem.addDamage(damageAmount);
+          triggerCrashEffect(crashParticles, sim.position, impactSpeed / 15);
+          applyVisualDamage(carMesh, damageSystem.damagePercent);
+        }
+
+        // Bounce off the bridge barrier
+        const bounceNormal = bridgeInfo.normal;
         const vn = Vector3.Dot(sim.velocity, bounceNormal);
         if (vn < 0) {
           sim.velocity.addInPlace(bounceNormal.scale(-vn * 1.5));
@@ -546,10 +572,11 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       case "hood": {
         // Hood camera - mounted on bonnet, looking forward over the hood
         // Position camera low enough to see the bonnet and tilt slightly down.
-        const hoodPos = sim.position.add(forward.scale(0.35)).add(new Vector3(0, 0.9, 0));
-        // Look at a nearer point so the hood stays in the lower frame.
-        const hoodTarget = hoodPos.add(forward.scale(14)).add(new Vector3(0, -0.45, 0));
-        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.82, false);
+        // Keep the camera above the body geometry (avoid sitting inside the mesh).
+        const hoodPos = sim.position.add(forward.scale(1.05)).add(new Vector3(0, 1.05, 0));
+        // Look fairly near and down to keep the bonnet in frame.
+        const hoodTarget = hoodPos.add(forward.scale(18)).add(new Vector3(0, -0.7, 0));
+        setArcCameraFromPositionTarget(hoodPos, hoodTarget, 0.95, false);
         // Show only front of car (hood visible, rest hidden would require mesh splitting)
         setCarVisible(true);
         break;
@@ -557,10 +584,10 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       case "bumper": {
         // Bumper camera - low angle from front of car, seeing bonnet and road ahead
         // Place slightly behind the very front so some nose/bonnet stays in-frame, with a slight down tilt.
-        const bumperPos = sim.position.add(forward.scale(1.65)).add(new Vector3(0, 0.34, 0));
-        // Look at a nearer point so the car nose remains visible.
-        const bumperTarget = bumperPos.add(forward.scale(14)).add(new Vector3(0, -0.3, 0));
-        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.86, false);
+        // Raise above the nose geometry (front nose only reaches ~0.6m high).
+        const bumperPos = sim.position.add(forward.scale(1.8)).add(new Vector3(0, 0.9, 0));
+        const bumperTarget = bumperPos.add(forward.scale(18)).add(new Vector3(0, -0.8, 0));
+        setArcCameraFromPositionTarget(bumperPos, bumperTarget, 0.98, false);
         // Show car - bonnet should be visible from this angle
         setCarVisible(true);
         break;
@@ -615,6 +642,40 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       updateTelemetry(step);
     });
     scene.render();
+
+    // Performance monitoring - auto-reduce quality if FPS is consistently low
+    performanceCheckInterval++;
+    if (performanceCheckInterval >= 60) { // Check every 60 frames (~1 second)
+      performanceCheckInterval = 0;
+      const currentFps = engine.getFps();
+      fpsHistory.push(currentFps);
+
+      // Keep only last 5 seconds of history
+      if (fpsHistory.length > 5) {
+        fpsHistory.shift();
+      }
+
+      // If FPS is consistently below 30, auto-reduce quality
+      if (fpsHistory.length >= 3) {
+        const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+        if (avgFps < 30) {
+          lowFpsFrames++;
+          if (lowFpsFrames >= 3) { // 3 consecutive low FPS checks
+            // Auto-reduce quality
+            const currentIndex = QUALITY_PRESETS.findIndex(p => p.id === quality);
+            if (currentIndex > 0) {
+              const lowerQuality = QUALITY_PRESETS[currentIndex - 1];
+              console.warn(`Auto-reducing quality from ${quality} to ${lowerQuality.id} due to low FPS (${avgFps.toFixed(1)})`);
+              applyQuality(lowerQuality.id);
+              lowFpsFrames = 0;
+              fpsHistory = [];
+            }
+          }
+        } else {
+          lowFpsFrames = 0;
+        }
+      }
+    }
   };
 
   let started = false;
@@ -670,9 +731,11 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
     zoomLevel = Math.max(0.15, Math.min(1.5, value));
   };
 
-  // keep a strong ref for devtools inspection
+  // Keep a strong ref for devtools inspection (dev mode only)
   void scene;
-  (window as any).__apexGame = { engine, scene, sim, track };
+  if (import.meta.env.DEV) {
+    (window as any).__apexGame = { engine, scene, sim, track };
+  }
 
   return {
     start,

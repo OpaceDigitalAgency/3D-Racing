@@ -1,4 +1,5 @@
 import "./style.css";
+import "./ui/LoadingScreen.css";
 import "@babylonjs/core/Legacy/legacy";
 import { createGame } from "./game/Game";
 import { mountUI } from "./ui/mountUI";
@@ -19,12 +20,46 @@ function showFatal(err: unknown) {
   document.body.appendChild(el);
 }
 
+function createLoadingScreen(container: HTMLElement) {
+  const loadingDiv = document.createElement("div");
+  loadingDiv.className = "loading-screen";
+  loadingDiv.innerHTML = `
+    <div class="loading-content">
+      <h1 class="loading-title">APEX//WEB</h1>
+      <div class="loading-bar-container">
+        <div class="loading-bar" id="loading-bar"></div>
+      </div>
+      <p class="loading-message" id="loading-message">Initialising...</p>
+      <p class="loading-percentage" id="loading-percentage">0%</p>
+    </div>
+  `;
+  container.appendChild(loadingDiv);
+
+  return {
+    update: (progress: number, message: string) => {
+      const bar = document.getElementById("loading-bar");
+      const msg = document.getElementById("loading-message");
+      const pct = document.getElementById("loading-percentage");
+      if (bar) bar.style.width = `${progress}%`;
+      if (msg) msg.textContent = message;
+      if (pct) pct.textContent = `${Math.round(progress)}%`;
+    },
+    remove: () => {
+      loadingDiv.remove();
+    }
+  };
+}
+
 async function boot() {
   const root = document.getElementById("root");
   if (!root) throw new Error("Missing #root");
 
   const uiRoot = document.getElementById("ui-root");
   if (!uiRoot) throw new Error("Missing #ui-root");
+
+  // Create loading screen
+  const loading = createLoadingScreen(uiRoot);
+  loading.update(0, "Initialising engine...");
 
   const canvas = document.createElement("canvas");
   canvas.setAttribute("aria-label", "APEX//WEB canvas");
@@ -61,7 +96,22 @@ async function boot() {
     true
   );
 
+  loading.update(20, "Creating game engine...");
+
+  // Add small delay to ensure loading screen renders
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  loading.update(40, "Loading assets...");
   const game = await createGame({ canvas });
+
+  loading.update(80, "Preparing scene...");
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  loading.update(100, "Ready!");
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  // Hide loading screen and mount game UI
+  loading.remove();
   mountUI({ game, mountEl: uiRoot });
 
   game.start();

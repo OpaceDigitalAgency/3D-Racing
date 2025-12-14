@@ -5,6 +5,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { ExtrudeShape } from "@babylonjs/core/Meshes/Builders/shapeBuilder";
 import type { Scene } from "@babylonjs/core/scene";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 
@@ -18,8 +19,14 @@ export type BridgeInfo = {
   rotation: number;
 };
 
+type BridgeRouteInfo = {
+  width: number;
+  path: Vector3[]; // contains world-space x/y/z points for the drivable surface centerline
+};
+
 export class BridgeSystem {
   readonly bridges: BridgeInfo[] = [];
+  private readonly routes: BridgeRouteInfo[] = [];
 
   constructor(private scene: Scene, private shadowGen?: ShadowGenerator) {}
 
@@ -37,6 +44,96 @@ export class BridgeSystem {
     this.createBridgeMesh(bridgeInfo);
 
     return bridgeInfo;
+  }
+
+  // Curved overpass route that starts on the road, rises and curves into the infield, then rejoins later.
+  // This creates a realistic on-ramp/off-ramp alternative path.
+  addCurvedOverpass(opts: {
+    startX: number;
+    startZ: number;
+    endX: number;
+    endZ: number;
+    deckX: number;
+    deckStartZ: number;
+    deckEndZ: number;
+    width?: number;
+    height?: number;
+  }) {
+    const width = opts.width ?? 10;
+    const height = opts.height ?? 3;
+
+    const p0 = new Vector3(opts.startX, 0, opts.startZ);
+    const p1 = new Vector3(opts.startX, 0, (opts.startZ + opts.deckStartZ) * 0.5);
+    const p2 = new Vector3(opts.deckX, 0, (opts.startZ + opts.deckStartZ) * 0.5);
+    const p3 = new Vector3(opts.deckX, 0, opts.deckStartZ);
+
+    const q0 = new Vector3(opts.deckX, 0, opts.deckEndZ);
+    const q1 = new Vector3(opts.deckX, 0, (opts.endZ + opts.deckEndZ) * 0.5);
+    const q2 = new Vector3(opts.endX, 0, (opts.endZ + opts.deckEndZ) * 0.5);
+    const q3 = new Vector3(opts.endX, 0, opts.endZ);
+
+    const rampSteps = 36;
+    const deckSteps = 24;
+    const path: Vector3[] = [];
+
+    const cubic = (a: number, b: number, c: number, d: number, t: number) => {
+      const it = 1 - t;
+      return it * it * it * a + 3 * it * it * t * b + 3 * it * t * t * c + t * t * t * d;
+    };
+
+    // Ease-in-out cubic (same shape used for ramps elsewhere).
+    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+    for (let i = 0; i <= rampSteps; i++) {
+      const t = i / rampSteps;
+      const x = cubic(p0.x, p1.x, p2.x, p3.x, t);
+      const z = cubic(p0.z, p1.z, p2.z, p3.z, t);
+      const y = ease(t) * height;
+      path.push(new Vector3(x, y, z));
+    }
+
+    for (let i = 1; i <= deckSteps; i++) {
+      const t = i / deckSteps;
+      const x = opts.deckX;
+      const z = opts.deckStartZ + (opts.deckEndZ - opts.deckStartZ) * t;
+      path.push(new Vector3(x, height, z));
+    }
+
+    for (let i = 1; i <= rampSteps; i++) {
+      const t = i / rampSteps;
+      const x = cubic(q0.x, q1.x, q2.x, q3.x, t);
+      const z = cubic(q0.z, q1.z, q2.z, q3.z, t);
+      const y = ease(1 - t) * height;
+      path.push(new Vector3(x, y, z));
+    }
+
+    this.routes.push({ width, path });
+    this.createCurvedOverpassMesh({ width, height, path });
+  }
+
+  private createCurvedOverpassMesh(info: { width: number; height: number; path: Vector3[] }) {
+    const { width, path } = info;
+
+    const deckMat = new PBRMaterial("overpassDeckMat", this.scene);
+    deckMat.albedoColor = new Color3(0.2, 0.2, 0.22);
+    deckMat.roughness = 0.85;
+    deckMat.metallic = 0.05;
+
+    const roadShape = [
+      new Vector3(-width / 2, 0.08, 0),
+      new Vector3(width / 2, 0.08, 0),
+      new Vector3(width / 2, 0.0, 0),
+      new Vector3(-width / 2, 0.0, 0)
+    ];
+
+    const mesh = ExtrudeShape(
+      "overpassRoad",
+      { shape: roadShape, path, cap: Mesh.CAP_ALL, updatable: false, sideOrientation: Mesh.DOUBLESIDE },
+      this.scene
+    );
+    mesh.material = deckMat;
+    mesh.receiveShadows = true;
+    if (this.shadowGen) this.shadowGen.addShadowCaster(mesh);
   }
 
   private createBridgeMesh(info: BridgeInfo) {
@@ -225,43 +322,137 @@ export class BridgeSystem {
     return ramp;
   }
 
-  // Get height at a position (for physics) - includes ramps with eased curve
-  getHeightAt(pos: Vector3): { height: number; onBridge: boolean } {
+  // Get height at a position (for physics) - includes ramps with eased curve and side collision detection
+  getHeightAt(pos: Vector3, carY?: number): { height: number; onBridge: boolean; sideCollision: boolean; normal: Vector3 } {
+    let bestHeight = 0;
+    let onAny = false;
+    let sideCollision = false;
+    let collisionNormal = new Vector3(0, 0, 0);
+    const barrierWidth = 0.6; // Width of side barriers/railings
+
+    // Curved routes (closest point on polyline in XZ, then lerp Y along the segment).
+    for (const route of this.routes) {
+      const { width, path } = route;
+      const halfWidth = width * 0.5;
+      const r2 = halfWidth * halfWidth;
+      const outerR2 = (halfWidth + barrierWidth) * (halfWidth + barrierWidth);
+
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i];
+        const b = path[i + 1];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const len2 = dx * dx + dz * dz;
+        if (len2 < 1e-6) continue;
+        const px = pos.x - a.x;
+        const pz = pos.z - a.z;
+        let t = (px * dx + pz * dz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const cx = a.x + dx * t;
+        const cz = a.z + dz * t;
+        const ddx = pos.x - cx;
+        const ddz = pos.z - cz;
+        const dist2 = ddx * ddx + ddz * ddz;
+
+        // Get height at this point along the route
+        const h = a.y + (b.y - a.y) * t;
+
+        // Check if car is at or above route height - side collision only applies when elevated
+        const carHeight = carY ?? pos.y;
+        const isElevated = h > 0.5 && carHeight >= h - 1.0;
+
+        // Check for side collision - hitting the edge barrier from outside
+        if (dist2 > r2 && dist2 <= outerR2 && isElevated) {
+          sideCollision = true;
+          const dist = Math.sqrt(dist2);
+          collisionNormal = new Vector3(ddx / dist, 0, ddz / dist);
+          continue;
+        }
+
+        if (dist2 > r2) continue;
+
+        if (h > bestHeight) bestHeight = h;
+        onAny = true;
+      }
+    }
+
     for (const bridge of this.bridges) {
-      const { start, end, width, height, rampLength, direction: dir } = bridge;
+      const { start, end, width, height, rampLength, direction: dir, rotation } = bridge;
       const deckLength = Vector3.Distance(start, end);
+      const halfWidth = width / 2;
 
       // Calculate perpendicular distance to the bridge line
       const toBridge = pos.subtract(start);
       const along = Vector3.Dot(toBridge, dir);
       const perp = new Vector3(-dir.z, 0, dir.x);
-      const perpDist = Math.abs(Vector3.Dot(toBridge, perp));
+      const perpDist = Vector3.Dot(toBridge, perp);
+      const absPerpDist = Math.abs(perpDist);
 
-      // Check if within bridge width
-      if (perpDist > width / 2) continue;
+      // Check if within the bridge's length span (including ramps)
+      const withinLength = along >= -rampLength && along <= deckLength + rampLength;
+
+      // Calculate height at current position along bridge
+      let bridgeHeight = 0;
+      if (along >= -rampLength && along < 0) {
+        const t = (along + rampLength) / rampLength;
+        bridgeHeight = this.easeInOutCubic(t) * height;
+      } else if (along >= 0 && along <= deckLength) {
+        bridgeHeight = height;
+      } else if (along > deckLength && along <= deckLength + rampLength) {
+        const t = (along - deckLength) / rampLength;
+        bridgeHeight = this.easeInOutCubic(1 - t) * height;
+      }
+
+      // Check if car is at or above bridge height - for side collision
+      const carHeight = carY ?? pos.y;
+      const isElevated = bridgeHeight > 0.5 && carHeight >= bridgeHeight - 1.5;
+
+      // Side collision check - hitting barriers from the side while elevated
+      if (withinLength && absPerpDist > halfWidth && absPerpDist <= halfWidth + barrierWidth && isElevated) {
+        sideCollision = true;
+        collisionNormal = perp.scale(perpDist > 0 ? 1 : -1);
+        continue;
+      }
+
+      // Check if trying to drive up the side of an elevated bridge (not from ramp entry)
+      // This detects when car approaches from perpendicular to bridge direction
+      if (withinLength && absPerpDist <= halfWidth + barrierWidth && bridgeHeight > 0.3) {
+        // Check if car is below the bridge surface (trying to drive through side)
+        if (carHeight < bridgeHeight - 0.5 && absPerpDist > halfWidth * 0.7) {
+          // Car is approaching from the side at ground level - treat as solid wall
+          sideCollision = true;
+          collisionNormal = perp.scale(perpDist > 0 ? 1 : -1);
+          continue;
+        }
+      }
+
+      // Check if within bridge width for height calculation
+      if (absPerpDist > halfWidth) continue;
 
       // Check different sections of the bridge
       // Start ramp: from -rampLength to 0 (relative to start point)
       if (along >= -rampLength && along < 0) {
-        const t = (along + rampLength) / rampLength;  // 0 at ground, 1 at deck height
-        // Use same eased curve as visual ramp for consistent physics
+        const t = (along + rampLength) / rampLength;
         const easedT = this.easeInOutCubic(t);
-        return { height: easedT * height, onBridge: true };
+        bestHeight = Math.max(bestHeight, easedT * height);
+        onAny = true;
       }
 
       // Main deck: from 0 to deckLength
       if (along >= 0 && along <= deckLength) {
-        return { height: height, onBridge: true };
+        bestHeight = Math.max(bestHeight, height);
+        onAny = true;
       }
 
       // End ramp: from deckLength to deckLength + rampLength
       if (along > deckLength && along <= deckLength + rampLength) {
-        const t = (along - deckLength) / rampLength;  // 0 at deck, 1 at ground
-        // Use inverse eased curve - t goes from 0 to 1 as we descend
+        const t = (along - deckLength) / rampLength;
         const easedT = this.easeInOutCubic(1 - t);
-        return { height: easedT * height, onBridge: true };
+        bestHeight = Math.max(bestHeight, easedT * height);
+        onAny = true;
       }
     }
-    return { height: 0, onBridge: false };
+
+    return { height: bestHeight, onBridge: onAny, sideCollision, normal: collisionNormal };
   }
 }

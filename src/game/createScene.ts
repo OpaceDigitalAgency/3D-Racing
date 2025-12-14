@@ -91,10 +91,11 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   sun.diffuse = new Color3(1.0, 0.95, 0.85);
   sun.specular = new Color3(1.0, 0.98, 0.9);
 
-  // High quality shadows
-  const shadowGen = new ShadowGenerator(4096, sun);
+  // Optimised shadows - start with medium quality for faster initial load
+  // Quality preset system will adjust this based on user settings
+  const shadowGen = new ShadowGenerator(2048, sun); // Reduced from 4096 for faster startup
   shadowGen.useBlurExponentialShadowMap = true;
-  shadowGen.blurKernel = 48;
+  shadowGen.blurKernel = 24; // Reduced from 48 for faster startup
   shadowGen.bias = 0.00003;
   shadowGen.normalBias = 0.012;
   shadowGen.darkness = 0.3;
@@ -102,16 +103,32 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   shadowGen.contactHardeningLightSizeUVRatio = 0.05;
 
   // HDR environment for realistic reflections
-  const env = CubeTexture.CreateFromPrefilteredData("/env/environmentSpecular.env", scene);
-  scene.environmentTexture = env;
-  scene.environmentIntensity = 1.5;
+  // Load with error handling to prevent crashes on missing assets
+  let env: CubeTexture | null = null;
+  try {
+    env = CubeTexture.CreateFromPrefilteredData("/env/environmentSpecular.env", scene);
+    scene.environmentTexture = env;
+    scene.environmentIntensity = 1.5;
+  } catch (error) {
+    console.warn("Failed to load environment map, using fallback:", error);
+    // Fallback: use scene clear colour as environment
+    scene.environmentIntensity = 0.5;
+  }
 
   // Create high quality skybox from environment texture
   const skybox = MeshBuilder.CreateBox("skyBox", { size: 2000 }, scene);
   const skyboxMat = new PBRMaterial("skyBoxMat", scene);
   skyboxMat.backFaceCulling = false;
-  skyboxMat.reflectionTexture = env.clone();
-  skyboxMat.reflectionTexture!.coordinatesMode = Texture.SKYBOX_MODE;
+
+  if (env) {
+    // Share the same texture reference instead of cloning (saves memory)
+    skyboxMat.reflectionTexture = env;
+    skyboxMat.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
+  } else {
+    // Fallback: solid colour skybox
+    skyboxMat.albedoColor = new Color3(0.45, 0.65, 0.85);
+  }
+
   skyboxMat.microSurface = 1.0;
   skyboxMat.disableLighting = true;
   skyboxMat.twoSidedLighting = true;
@@ -147,24 +164,18 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
     taa = null;
   }
 
-  // High quality post-processing pipeline
+  // Optimised post-processing pipeline - start with lighter settings
   const pipeline = new DefaultRenderingPipeline("pipe", true, scene, [camera]);
-  pipeline.samples = 8; // Higher MSAA for smoother edges
+  pipeline.samples = 4; // Reduced from 8 for faster startup
   pipeline.fxaaEnabled = true;
   pipeline.bloomEnabled = true;
-  pipeline.bloomWeight = 0.2;
+  pipeline.bloomWeight = 0.15; // Reduced for better performance
   pipeline.bloomThreshold = 0.7;
-  pipeline.bloomKernel = 96;
+  pipeline.bloomKernel = 64; // Reduced from 96 for better performance
   pipeline.bloomScale = 0.6;
-  pipeline.chromaticAberrationEnabled = true;
-  pipeline.chromaticAberration.aberrationAmount = 3.5;
-  pipeline.chromaticAberration.radialIntensity = 0.6;
-  pipeline.grainEnabled = true;
-  pipeline.grain.intensity = 1.4;
-  pipeline.grain.animated = true;
-  pipeline.sharpenEnabled = true;
-  pipeline.sharpen.edgeAmount = 0.18;
-  pipeline.sharpen.colorAmount = 0.65;
+  pipeline.chromaticAberrationEnabled = false; // Disabled initially for performance
+  pipeline.grainEnabled = false; // Disabled initially for performance
+  pipeline.sharpenEnabled = false; // Disabled initially for performance
   pipeline.depthOfFieldEnabled = false;
   pipeline.imageProcessingEnabled = true;
 
@@ -239,11 +250,20 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   speedPads.addPadOnTrack(0.52, 6, 10);   // Mid opposite straight
   speedPads.addPadOnTrack(0.78, 6, 10);   // Before final corner
 
-  // Create bridge/overpass as an optional route on the right straight.
-  // Aligned with the travel direction so it's easy to drive onto (choose ramp up vs stay on the road).
+  // Curved on/off-ramp overpass route (realistic merge + rejoin).
   const bridges = new BridgeSystem(scene, shadowGen);
-  // Right straight centerline is around x=95; keep z range away from corners for clean entry/exit.
-  bridges.addBridge(95, -20, 95, 20, 10, 3);
+  // Use the right straight (x≈95) and peel into the infield, then rejoin later.
+  bridges.addCurvedOverpass({
+    startX: 90,
+    startZ: -45,
+    endX: 90,
+    endZ: 45,
+    deckX: 72,
+    deckStartZ: -20,
+    deckEndZ: 20,
+    width: 10,
+    height: 3
+  });
 
   // Add sponsor banners and props around the track
   const props = new TrackProps(scene, track, shadowGen);
