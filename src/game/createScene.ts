@@ -91,11 +91,10 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
   sun.diffuse = new Color3(1.0, 0.95, 0.85);
   sun.specular = new Color3(1.0, 0.98, 0.9);
 
-  // Optimised shadows - start with medium quality for faster initial load
-  // Quality preset system will adjust this based on user settings
-  const shadowGen = new ShadowGenerator(2048, sun); // Reduced from 4096 for faster startup
+  // High quality shadows
+  const shadowGen = new ShadowGenerator(4096, sun);
   shadowGen.useBlurExponentialShadowMap = true;
-  shadowGen.blurKernel = 24; // Reduced from 48 for faster startup
+  shadowGen.blurKernel = 48;
   shadowGen.bias = 0.00003;
   shadowGen.normalBias = 0.012;
   shadowGen.darkness = 0.3;
@@ -164,18 +163,24 @@ export async function createScene(engine: AbstractEngine, canvas: HTMLCanvasElem
     taa = null;
   }
 
-  // Optimised post-processing pipeline - start with lighter settings
+  // High quality post-processing pipeline
   const pipeline = new DefaultRenderingPipeline("pipe", true, scene, [camera]);
-  pipeline.samples = 4; // Reduced from 8 for faster startup
+  pipeline.samples = 8;
   pipeline.fxaaEnabled = true;
   pipeline.bloomEnabled = true;
-  pipeline.bloomWeight = 0.15; // Reduced for better performance
+  pipeline.bloomWeight = 0.2;
   pipeline.bloomThreshold = 0.7;
-  pipeline.bloomKernel = 64; // Reduced from 96 for better performance
+  pipeline.bloomKernel = 96;
   pipeline.bloomScale = 0.6;
-  pipeline.chromaticAberrationEnabled = false; // Disabled initially for performance
-  pipeline.grainEnabled = false; // Disabled initially for performance
-  pipeline.sharpenEnabled = false; // Disabled initially for performance
+  pipeline.chromaticAberrationEnabled = true;
+  pipeline.chromaticAberration.aberrationAmount = 3.5;
+  pipeline.chromaticAberration.radialIntensity = 0.6;
+  pipeline.grainEnabled = true;
+  pipeline.grain.intensity = 1.4;
+  pipeline.grain.animated = true;
+  pipeline.sharpenEnabled = true;
+  pipeline.sharpen.edgeAmount = 0.18;
+  pipeline.sharpen.colorAmount = 0.65;
   pipeline.depthOfFieldEnabled = false;
   pipeline.imageProcessingEnabled = true;
 

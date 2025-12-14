@@ -130,9 +130,8 @@ function isOnTrack(x: number, z: number, trackHalfWidth: number = 10): boolean {
 }
 
 export function createGrassField(scene: Scene, shadowGen: ShadowGenerator | null): Mesh {
-  // Create grass blade geometry - optimised for better performance
-  // Reduced from 35000 to 15000 for significantly better CPU performance
-  const bladeCount = 15000;
+  // Create grass blade geometry
+  const bladeCount = 35000;
   const fieldRadius = 140;
   const innerClearRadius = 12;
 

@@ -92,9 +92,7 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
   let motionBlurAttached = false;
 
   // Performance monitoring for auto-adjustment
-  let fpsHistory: number[] = [];
-  let lowFpsFrames = 0;
-  let performanceCheckInterval = 0;
+
   const applyQuality = (id: QualityPresetId) => {
     const preset = QUALITY_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[2];
     quality = preset.id;
@@ -642,40 +640,6 @@ export async function createGame({ canvas }: CreateGameArgs): Promise<GameAPI> {
       updateTelemetry(step);
     });
     scene.render();
-
-    // Performance monitoring - auto-reduce quality if FPS is consistently low
-    performanceCheckInterval++;
-    if (performanceCheckInterval >= 60) { // Check every 60 frames (~1 second)
-      performanceCheckInterval = 0;
-      const currentFps = engine.getFps();
-      fpsHistory.push(currentFps);
-
-      // Keep only last 5 seconds of history
-      if (fpsHistory.length > 5) {
-        fpsHistory.shift();
-      }
-
-      // If FPS is consistently below 30, auto-reduce quality
-      if (fpsHistory.length >= 3) {
-        const avgFps = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
-        if (avgFps < 30) {
-          lowFpsFrames++;
-          if (lowFpsFrames >= 3) { // 3 consecutive low FPS checks
-            // Auto-reduce quality
-            const currentIndex = QUALITY_PRESETS.findIndex(p => p.id === quality);
-            if (currentIndex > 0) {
-              const lowerQuality = QUALITY_PRESETS[currentIndex - 1];
-              console.warn(`Auto-reducing quality from ${quality} to ${lowerQuality.id} due to low FPS (${avgFps.toFixed(1)})`);
-              applyQuality(lowerQuality.id);
-              lowFpsFrames = 0;
-              fpsHistory = [];
-            }
-          }
-        } else {
-          lowFpsFrames = 0;
-        }
-      }
-    }
   };
 
   let started = false;
